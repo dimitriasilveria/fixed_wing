@@ -126,9 +126,11 @@ for i in range(0,N): #calculating the erros
     dU[:,i] = -K_lqr[:,:,i]@d_Xi[:,i] 
 #     dU(1,i) = min(max(dU(1,i),-10),10) 
 #     dU(2:4,i) = min(max(dU(2:4,i),-pi/2),pi/2) 
+    #this part has to be modified############################################
     f_T[0,i] = f_T_r[0,i] - dU[0,i] 
     #20.44
     f_T[0,i] = np.clip(f_T[0,i],0,20.44) 
+    #########################################################################
     wb_b_cont[:,i] = dC[:,:,i]@wr_r[:,i] - dU[1:4,i]
     #10*pi/3
     wb_b_cont[:,i] = np.clip(wb_b_cont[:,i],-10*np.pi/3,10*np.pi/3) 
@@ -167,35 +169,7 @@ for i in range(0,N): #calculating the erros
 
 
 
-fig = figure(1) 
-subplot(3,1,1)
-plot(t,abs_phi) 
-ylabel('$\delta \phi$','Interpreter','latex')
-subplot(3,1,2)
-plot(t,abs_r)
-ylabel('$\delta v$','Interpreter','latex')
-subplot(3,1,3)
-plot(t,abs_v)
-ylabel('$\delta r$','Interpreter','latex')
-exportgraphics(fig,'states_error_proportional.png')
 
-fig = figure(2) 
-subplot(2,1,1)
-plot(t,abs_f(1,:))
-ylabel('$\delta f_T$','Interpreter','latex')
-subplot(2,1,2)
-plot(t,abs_w(1,:))
-ylabel('$\delta \omega$','Interpreter','latex')
-exportgraphics(fig,'inputs_error_proportional.png')
-
-fig = figure(3) 
-plot3(ra_r(1,:),ra_r(2,:),ra_r(3,:))
-hold on
-plot3(X(7,:),X(8,:),X(9,:),'k')
-hold off
-grid on
-legend('reference','actual') 
-# 
 # fig = figure(4) 
 # plot(t,va_r(1,:))
 # hold on
