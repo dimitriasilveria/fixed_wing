@@ -144,8 +144,9 @@ for i in range(0,N): #calculating the erros
     y_prev[3,:] = X[1:3,i].T 
     y_prev[4:6,:] = Cab[:,:,i]
 
-
+    #this part needs to be modified############################################
     y_next = runge_kutta(f_T(1,i),mb_r(:,i),y_prev,T) 
+    ###########################################################################
     X[0:3,i+1] = y_next[2,:].T #wb_b_cont(:,i) #wr_r(:,i+1) #
     X[3:6,i+1] = y_next[1,:].T #va_r(:,i+1) #
     X[6:9,i+1] = y_next[0,:].T #ra_r(:,i+1) #
