@@ -1209,7 +1209,7 @@ class PyFly:
         f = + fg_b + Car@f_aero.T + self.params["mass"]*acc.T + f_prop
 
 
-        return f
+        return f_prop, f_aero
     
     def _forces(self, attitude, omega, vel, controls):
         """
@@ -1296,6 +1296,92 @@ class PyFly:
         tau = tau_aero + tau_prop
 
         return f, tau
+    
+    def reference_forces(self, attitude, omega, vel, controls):
+        """
+        Get aerodynamic forces acting on aircraft.
+
+        :param attitude: ([float]) attitude quaternion of aircraft
+        :param omega: ([float]) angular velocity of aircraft
+        :param vel: ([float]) linear velocity of aircraft
+        :param controls: ([float]) state of actutators
+        :return: ([float], [float]) forces and moments in x, y, z of aircraft frame
+        """
+        elevator, aileron, rudder, throttle = controls
+
+        p, q, r = omega
+
+        if self.wind.turbulence:
+            p_w, q_w, r_w = self.wind.get_turbulence_angular(self.cur_sim_step)
+            p, q, r = p - p_w, q - q_w, r - r_w
+
+        Va, alpha, beta = self._calculate_airspeed_factors(attitude, vel)
+
+        Va = self.state["Va"].apply_conditions(Va)
+        alpha = self.state["alpha"].apply_conditions(alpha)
+        beta = self.state["beta"].apply_conditions(beta)
+
+        pre_fac = 0.5 * self.rho * Va ** 2 * self.params["S_wing"]
+
+        e0, e1, e2, e3 = attitude
+        fg_b = self.params["mass"] * self.g * np.array([2 * (e1 * e3 - e2 * e0),
+                                                        2 * (e2 * e3 + e1 * e0),
+                                                        e3 ** 2 + e0 ** 2 - e1 ** 2 - e2 ** 2])
+
+        C_L_alpha_lin = self.params["C_L_0"] + self.params["C_L_alpha"] * alpha
+
+        # Nonlinear version of lift coefficient with stall
+        a_0 = self.params["a_0"]
+        M = self.params["M"]
+        e = self.params["e"]  # oswald efficiency
+        ar = self.params["ar"]
+        C_D_p = self.params["C_D_p"]
+        C_m_fp = self.params["C_m_fp"]
+        C_m_alpha = self.params["C_m_alpha"]
+        C_m_0 = self.params["C_m_0"]
+
+        sigma = (1 + np.exp(-M * (alpha - a_0)) + np.exp(M * (alpha + a_0))) / (
+                    (1 + np.exp(-M * (alpha - a_0))) * (1 + np.exp(M * (alpha + a_0))))
+        C_L_alpha = (1 - sigma) * C_L_alpha_lin + sigma * (2 * np.sign(alpha) * np.sin(alpha) ** 2 * np.cos(alpha))
+
+        f_lift_s = pre_fac * (C_L_alpha + self.params["C_L_q"] * self.params["c"] / (2 * Va) * q + self.params[
+            "C_L_delta_e"] * elevator)
+        # C_D_alpha = self.params["C_D_0"] + self.params["C_D_alpha1"] * alpha + self.params["C_D_alpha2"] * alpha ** 2
+        C_D_alpha = C_D_p + (1 - sigma) * (self.params["C_L_0"] + self.params["C_L_alpha"] * alpha) ** 2 / (
+                    np.pi * e * ar) + sigma * (2 * np.sign(alpha) * math.pow(np.sin(alpha), 3))
+        C_D_beta = self.params["C_D_beta1"] * beta + self.params["C_D_beta2"] * beta ** 2
+        f_drag_s = pre_fac * (
+                    C_D_alpha + C_D_beta + self.params["C_D_q"] * self.params["c"] / (2 * Va) * q + self.params[
+                "C_D_delta_e"] * elevator ** 2)
+
+        C_m = (1 - sigma) * (C_m_0 + C_m_alpha * alpha) + sigma * (C_m_fp * np.sign(alpha) * np.sin(alpha) ** 2)
+        m = pre_fac * self.params["c"] * (C_m + self.params["C_m_q"] * self.params["b"] / (2 * Va) * q + self.params[
+            "C_m_delta_e"] * elevator)
+
+        f_y = pre_fac * (
+                    self.params["C_Y_0"] + self.params["C_Y_beta"] * beta + self.params["C_Y_p"] * self.params["b"] / (
+                        2 * Va) * p + self.params["C_Y_r"] * self.params["b"] / (2 * Va) * r + self.params[
+                        "C_Y_delta_a"] * aileron + self.params["C_Y_delta_r"] * rudder)
+        l = pre_fac * self.params["b"] * (
+                    self.params["C_l_0"] + self.params["C_l_beta"] * beta + self.params["C_l_p"] * self.params["b"] / (
+                        2 * Va) * p + self.params["C_l_r"] * self.params["b"] / (2 * Va) * r + self.params[
+                        "C_l_delta_a"] * aileron + self.params["C_l_delta_r"] * rudder)
+        n = pre_fac * self.params["b"] * (
+                    self.params["C_n_0"] + self.params["C_n_beta"] * beta + self.params["C_n_p"] * self.params["b"] / (
+                        2 * Va) * p + self.params["C_n_r"] * self.params["b"] / (2 * Va) * r + self.params[
+                        "C_n_delta_a"] * aileron + self.params["C_n_delta_r"] * rudder)
+
+        f_aero = np.dot(self._rot_b_v(np.array([0, alpha, beta])), np.array([-f_drag_s, f_y, -f_lift_s]))
+        tau_aero = np.array([l, m, n])
+
+        Vd = Va + throttle * (self.params["k_motor"] - Va)
+        f_prop = np.array([0.5 * self.rho * self.params["S_prop"] * self.params["C_prop"] * Vd * (Vd - Va), 0, 0])
+        tau_prop = np.array([-self.params["k_T_P"] * (self.params["k_Omega"] * throttle) ** 2, 0, 0])
+
+        f = f_prop + fg_b + f_aero
+        tau = tau_aero + tau_prop
+
+        return f_prop, f_aero
 
     def _f_attitude_dot(self, t, attitude, omega):
         """
