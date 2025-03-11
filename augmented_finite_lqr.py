@@ -29,8 +29,9 @@ ca_1 = np.array([np.cos(w_r), np.sin(w_r), 0])  #auxiliar vector
 r = 1 
 #circle
 ra_r = np.array([[r*np.cos(2*np.pi*t/T_p)], [r*np.sin(2*np.pi*t/T_p)], [0.6*np.ones_like(t)]])  #reference position
-va_r = (2*np.pi/T_p)*np.array([[-r*np.sin(2*np.pi*t/T_p)], [r*np.cos(2*np.pi*t/T_p)], [0.6*np.zeros_like(t)]] ) #reference linear velocity
-va_r_dot = (2*np.pi/T_p)**2*np.array([[-r*np.cos(2*np.pi*t/T_p)], [-r*np.sin(2*np.pi*t/T_p)], [np.zeros_like(t)]]) #reference linear acceleration
+va_r = np.array([[(2*np.pi/T_p)*(-r*np.sin(2*np.pi*t/T_p))], [(2*np.pi/T_p)*r*np.cos(2*np.pi*t/T_p)], [0.6*np.zeros_like(t)]] ) #reference linear velocity
+va_r_dot = np.array([[(2*np.pi/T_p)**2*(-r*np.cos(2*np.pi*t/T_p))], [(2*np.pi/T_p)**2*(-r*np.sin(2*np.pi*t/T_p))], [np.zeros_like(t)]]) #reference linear acceleration
+z_w = np.array([0,0,1])
 
 wr_r = 0*va_r_dot  #reference angular velocity
 fa_r = np.zeros(3,N)  #reference control force

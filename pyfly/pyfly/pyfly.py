@@ -1186,7 +1186,6 @@ class PyFly:
         # Va = self.state["Va"].apply_conditions(Va)
         # alpha = self.state["alpha"].apply_conditions(alpha)
         # beta = self.state["beta"].apply_conditions(beta)
-
         pre_fac = 0.5 * self.rho * Va ** 2 * self.params["S_wing"]
 
         fg_b = self.params["mass"] * np.array([0,0,self.g]).T 
