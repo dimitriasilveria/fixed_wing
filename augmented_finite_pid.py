@@ -143,10 +143,12 @@ class PID_fixed_wing():
             self.f_T[0,i] = self.f_T_r[0,i] - self.dU[0,i]
             self.f_T[0,i] = np.clip(self.f_T[0,i],0,20.44)
             self.f_T_r[0,i+1] = self.f_T[0,i]
-            self.f_A = self.f_A_r[:,i] - self.dU[1:4,i]
+            self.f_A[:,i] = self.f_A_r[:,i] - self.dU[1:4,i]
+            self.f_A_r[:,i+1] = self.f_A[:,i]
             self.wb_b_cont[:,i] = self.dC[:,:,i]@self.wr_r[:,i] - self.dU[1:4,i]
             self.wb_b_cont[:,i] = np.clip(self.wb_b_cont[:,i],-10*np.pi/3,10*np.pi/3)
-
+            self.fixed_wing.calc_control() #should I use Cab or Car? 
+            #would f_T be the same as f_T_r depending on what attitude I use?
 
 wr_r = 0*va_r_dot  #reference angular velocity
 fa_r = np.zeros(3,N)  #reference control force
