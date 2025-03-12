@@ -28,7 +28,6 @@ class PID_fixed_wing():
         self.I3 = np.array([[0], [0], [1]])
         self.t = np.linspace(0,self.t_max,self.N) #time
 
-
         #reference trajectories###################################################
         self.r = 1 
         #circle
@@ -42,8 +41,7 @@ class PID_fixed_wing():
         self.f_A_r = np.zeros((3,self.N))  #reference aerodynamics force
         #controller and state-space matrices ###################################
         self.A = np.zeros((12,12,self.N))
-        self.B = np.zeros((12,4,self.N))
-        self.B[5,0,:] = np.ones(self.N)/self.mb  #check this
+        self.B = np.zeros((12,7,self.N)) #check this
         self.c1 = 1
         p = np.array([-5,-1.5, -1.1,-1.23,- 2.25,-5.5,-2.0,-1.0,-1.7])
         self.p_disc = np.exp(p*self.T)
@@ -52,9 +50,10 @@ class PID_fixed_wing():
         self.Cab = np.zeros((3,3,self.N))
         self.Cab[:,:,0] = np.eye(3) #eul2rotm([pi*0.5 0 0])*Ca_r(:,:,1) #
         self.f_T = np.zeros((1,self.N))  #actual thrust
+        self.f_A = np.zeros((3,self.N))  #actual aerodynamics force
         self.wb_b_cont = np.zeros((3,self.N)) #angular velocity input
         self.d_Xi = np.zeros((12,self.N))  #error
-        self.dU = np.zeros((4,self.N))
+        self.dU = np.zeros((7,self.N))
         self.dC = np.zeros((3,3,self.N))
         self.d_v = np.zeros((3,self.N))
         self.d_r = np.zeros((3,self.N))
@@ -85,7 +84,7 @@ class PID_fixed_wing():
             if (norm_x_B != 0) and (norm_aux != 0):
                 x_B = self.va_r[:,a,i]/norm_x_B
                 R = norm_x_B**2/norm_aux
-                phi = np.arctan2(norm_x_B**2,(g*R))
+                phi = np.arctan2(norm_x_B**2,(self.g*R))
                 z_intermediate = self.z_w - (self.z_w@x_B)*x_B
                 norm_z_intermediate = np.linalg.norm(z_intermediate)
                 if norm_z_intermediate != 0:
@@ -118,8 +117,10 @@ class PID_fixed_wing():
         self.A[6:9,6:9,i]   = -R3_so3(wr_r[:,i]) 
         self.A[9:12,3:6,i]  = np.eye(3) 
         self.A[9:12,6:9,i]  = self.c1*np.eye(3) 
-        self.B[0:3, 1:4,i]  = np.eye(3) 
-        self.B[3:6, 1:4,i]  = self.Car[:,:,i].T@self.va_r[:,i]/mb
+        self.B[5,0,i] = 1/self.mb 
+        self.B[3:6, 1:4,i] = self.eye(3)/self.mb
+        self.B[0:3, 4:7,i]  = np.eye(3)  
+        self.B[3:6, 4:7,i]  = self.Car[:,:,i].T@self.va_r[:,i]/self.mb
 
     
         self.A[:,:,i] = np.eye(12) + self.T * A[:,:,i]
@@ -141,9 +142,11 @@ class PID_fixed_wing():
             self.dU[:,i] = -self.K_pid[:,:,i]@self.d_Xi[:,i]
             self.f_T[0,i] = self.f_T_r[0,i] - self.dU[0,i]
             self.f_T[0,i] = np.clip(self.f_T[0,i],0,20.44)
+            self.f_T_r[0,i+1] = self.f_T[0,i]
+            self.f_A = self.f_A_r[:,i] - self.dU[1:4,i]
             self.wb_b_cont[:,i] = self.dC[:,:,i]@self.wr_r[:,i] - self.dU[1:4,i]
             self.wb_b_cont[:,i] = np.clip(self.wb_b_cont[:,i],-10*np.pi/3,10*np.pi/3)
-            
+
 
 wr_r = 0*va_r_dot  #reference angular velocity
 fa_r = np.zeros(3,N)  #reference control force

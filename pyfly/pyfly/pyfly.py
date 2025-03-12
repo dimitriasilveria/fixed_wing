@@ -1211,7 +1211,7 @@ class PyFly:
 
         return f_prop, f_aero
     
-    def _forces(self, attitude, omega, vel, controls):
+    def _forces(self, attitude, omega, vel, f_prop_ref, f_aero_ref):
         """
         Get aerodynamic forces acting on aircraft.
 
@@ -1221,7 +1221,9 @@ class PyFly:
         :param controls: ([float]) state of actutators
         :return: ([float], [float]) forces and moments in x, y, z of aircraft frame
         """
-        elevator, aileron, rudder, throttle = controls
+        #elevator, aileron, rudder, throttle = controls
+        elevator, aileron, rudder, throttle = self.calc_controls(attitude, vel, omega, f_prop_ref, f_aero_ref)
+        
 
         p, q, r = omega
 
@@ -1288,8 +1290,9 @@ class PyFly:
         f_aero = np.dot(self._rot_b_v(np.array([0, alpha, beta])), np.array([-f_drag_s, f_y, -f_lift_s]))
         tau_aero = np.array([l, m, n])
 
-        Vd = Va + throttle * (self.params["k_motor"] - Va)
-        f_prop = np.array([0.5 * self.rho * self.params["S_prop"] * self.params["C_prop"] * Vd * (Vd - Va), 0, 0])
+        # Vd = Va + throttle * (self.params["k_motor"] - Va)
+        # f_prop = np.array([0.5 * self.rho * self.params["S_prop"] * self.params["C_prop"] * Vd * (Vd - Va), 0, 0])
+        f_prop = np.array([0.5 * self.rho * self.params["S_prop"] * self.params["C_prop"] *  ((self.params["k_motor"]*throttle)**2 - Va**2), 0, 0])
         tau_prop = np.array([-self.params["k_T_P"] * (self.params["k_Omega"] * throttle) ** 2, 0, 0])
 
         f = f_prop + fg_b + f_aero
@@ -1297,6 +1300,49 @@ class PyFly:
 
         return f, tau
     
+    def calc_control(self, attitude, vel, omega, f_aero, f_prop):
+        f_lift_s = f_aero[2]
+        f_y = f_aero[1]
+        f_prop = f_prop[0]
+
+        Va, alpha, beta = self._calculate_airspeed_factors(attitude, vel)
+
+        Va = self.state["Va"].apply_conditions(Va)
+        alpha = self.state["alpha"].apply_conditions(alpha)
+        beta = self.state["beta"].apply_conditions(beta)
+        # Nonlinear version of lift coefficient with stall
+        a_0 = self.params["a_0"]
+        M = self.params["M"]
+        e = self.params["e"]  # oswald efficiency
+        ar = self.params["ar"]
+        C_D_p = self.params["C_D_p"]
+        C_m_fp = self.params["C_m_fp"]
+        C_m_alpha = self.params["C_m_alpha"]
+        C_m_0 = self.params["C_m_0"]
+
+        sigma = (1 + np.exp(-M * (alpha - a_0)) + np.exp(M * (alpha + a_0))) / (
+                    (1 + np.exp(-M * (alpha - a_0))) * (1 + np.exp(M * (alpha + a_0))))
+        
+        C_L_alpha_lin = self.params["C_L_0"] + self.params["C_L_alpha"] * alpha
+        C_L_alpha = (1 - sigma) * C_L_alpha_lin + sigma * (2 * np.sign(alpha) * np.sin(alpha) ** 2 * np.cos(alpha))
+
+        
+        p, q, r = omega
+
+        pre_fac = 0.5 * self.rho * Va ** 2 * self.params["S_wing"]
+
+        elevator = ((f_lift_s/pre_fac) - (C_L_alpha + self.params["C_L_q"] * self.params["c"] / (2 * Va) * q))/self.params["C_L_delta_e"]
+
+        C_fy = (f_y/pre_fac) - (self.params["C_Y_0"] + self.params["C_Y_beta"] * beta + self.params["C_Y_p"] * self.params["b"] / (2 * Va) * p + self.params["C_Y_r"] * self.params["b"] / (2 * Va) * r)
+        C_n = - (self.params["C_n_0"] + self.params["C_n_beta"] * beta + self.params["C_n_p"] * self.params["b"] / (
+                2 * Va) * p + self.params["C_n_r"] * self.params["b"] / (2 * Va) * r )
+        rudder = (self.params["C_Y_delta_a"]*C_n - self.params["C_Y_delta_r"]*C_fy)/(self.params["C_Y_delta_a"]*self.params["C_n_delta_r"] - self.params["C_Y_delta_r"]*self.params["C_n_delta_a"])
+        aileron = (C_fy - self.params["C_Y_delta_r"]*rudder)/self.params["C_Y_delta_a"]
+
+        throttle = (1/self.params["k_motor"]) * np.sqrt(f_prop/(0.5 * self.rho * self.params["S_prop"] * self.params["C_prop"]) - Va**2)
+
+        return elevator, aileron, rudder, throttle
+
     def reference_forces(self, attitude, omega, vel, controls):
         """
         Get aerodynamic forces acting on aircraft.
