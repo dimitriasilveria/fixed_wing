@@ -63,5 +63,6 @@ class PIDController:
         delta_a = np.clip(delta_a, self.delta_a_min, self.delta_a_max)
         delta_e = np.clip(delta_e, self.delta_e_min, self.delta_e_max)
 
-        return np.asarray([delta_e, delta_a, delta_t])
+        return np.asarray([delta_e, delta_a, delta_r, delta_t])
+
 

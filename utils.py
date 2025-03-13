@@ -4,6 +4,7 @@ from scipy.linalg import logm
 import time
 import rclpy
 import rclpy.logging
+from icecream import ic
 D = np.zeros((3,3))
 mb= 0.042
 g = 9.81
@@ -15,9 +16,9 @@ info = rclpy.logging.get_logger("rclpy").info
 
 
 def R3_so3(w):
-    v3 = w[2,0]
-    v2 = w[1,0]
-    v1 = w[0,0]
+    v3 = w[2]
+    v2 = w[1]
+    v1 = w[0]
     so3 = np.array([[ 0 , -v3,  v2],
           [v3,   0, -v1],
           [-v2,  v1,   0]])
@@ -35,27 +36,30 @@ def so3_R3(log_R):
 
 def SE3_se3_back(SE3):    
     R=SE3[0:3,0:3]
-    theta= np.acos((np.trace(R)-1)/2)
+    theta= np.arccos((np.trace(R)-1)/2)
     if theta !=0:
         lnR=logm(R) #(theta/(2*sin(theta)))*(R-R')
     else:
         lnR = np.zeros((3,3))
 
-    w= [-lnR[1,2], lnR[0,2], -lnR[0,1]]
-    wx=np.array([[0,     -w[2], w[2]],[w[2],   0,   -w[0]],[-w[1], w[0],   0]])
+    w= np.array([[-lnR[1,2]], [lnR[0,2]], [-lnR[0,1]]])
+    wx=np.array([[0,     -w[2,0], w[2,0]],[w[2,0],   0,   -w[0,0]],[-w[1,0], w[0,0],   0]])
     if(theta==0):
         Vin=np.eye(3)
     else:
         A=np.sin(theta)/theta
         B=(1-np.cos(theta))/(theta**2)
         Vin=np.eye(3)-(1/2)*wx+(1/(theta**2))*(1-(A/(2*B)))*(wx@wx)
-    v =Vin@SE3[0:3,3]
-    r = Vin@SE3[0:3,4]
-    se3=np.array([w.T, v, r])
+    v =Vin@SE3[0:3,3].reshape(-1,1)
+    r = Vin@SE3[0:3,4].reshape(-1,1)
+    
+    se3=np.vstack((w, v, r)).reshape(-1,)
+
     return se3
 
 def dX_to_dXi(dC,dv,dr):
-    dX = np.array([[dC, dv ,dr],[np.zeros((1,3)), 1, 0], [np.zeros((1,3)), 0, 1]])
+    s = np.hstack((dC,dv.reshape(-1,1),dr.reshape(-1,1)))
+    dX = np.vstack((s,np.array([0, 0, 0, 1, 0]), np.array([0, 0, 0, 0, 1])))
     dXi = SE3_se3_back(dX)
     return dXi
 

@@ -958,7 +958,7 @@ class PyFly:
 
         for state in self.model_inputs:
             if state not in self.state:
-                self.state[state] = ControlVariable(name=state, disabled=True)
+                self.state[state] = ControlVariable(name=state, disabled=False)
                 self.actuation.add_state(self.state[state])
 
         self.actuation.finalize()
@@ -1156,7 +1156,6 @@ class PyFly:
         omega = self.get_states_vector(["omega_p", "omega_q", "omega_r"])
         vel = np.array(self.get_states_vector(["velocity_u", "velocity_v", "velocity_w"]))
         u_states = self.get_states_vector(self.model_inputs)
-
         f, tau = self._forces(attitude, omega, vel, u_states)
 
         return np.concatenate([
@@ -1211,7 +1210,7 @@ class PyFly:
 
         return f_prop, f_aero
     
-    def _forces(self, attitude, omega, vel, f_prop_ref, f_aero_ref):
+    def _forces(self, attitude, omega, vel, controls):
         """
         Get aerodynamic forces acting on aircraft.
 
@@ -1221,8 +1220,8 @@ class PyFly:
         :param controls: ([float]) state of actutators
         :return: ([float], [float]) forces and moments in x, y, z of aircraft frame
         """
-        #elevator, aileron, rudder, throttle = controls
-        elevator, aileron, rudder, throttle = self.calc_controls(attitude, vel, omega, f_prop_ref, f_aero_ref)
+        elevator, aileron, rudder, throttle = controls
+        #elevator, aileron, rudder, throttle = self.calc_control(attitude, vel, omega, f_prop_ref, f_aero_ref)
         
 
         p, q, r = omega
@@ -1300,7 +1299,7 @@ class PyFly:
 
         return f, tau
     
-    def calc_control(self, attitude, vel, omega, f_aero, f_prop):
+    def calc_control(self, attitude, vel, omega, f_prop, f_aero):
         f_lift_s = f_aero[2]
         f_y = f_aero[1]
         f_prop = f_prop[0]
@@ -1341,7 +1340,7 @@ class PyFly:
 
         throttle = (1/self.params["k_motor"]) * np.sqrt(f_prop/(0.5 * self.rho * self.params["S_prop"] * self.params["C_prop"]) - Va**2)
 
-        return elevator, aileron, rudder, throttle
+        return np.array([elevator, aileron, rudder, throttle])
 
     def reference_forces(self, attitude, omega, vel, controls):
         """
@@ -1421,7 +1420,7 @@ class PyFly:
         tau_aero = np.array([l, m, n])
 
         Vd = Va + throttle * (self.params["k_motor"] - Va)
-        f_prop = np.array([0.5 * self.rho * self.params["S_prop"] * self.params["C_prop"] * Vd * (Vd - Va), 0, 0])
+        f_prop = np.array([0.5 * self.rho * self.params["S_prop"] * self.params["C_prop"] *  ((self.params["k_motor"]*throttle)**2 - Va**2), 0, 0])        
         tau_prop = np.array([-self.params["k_T_P"] * (self.params["k_Omega"] * throttle) ** 2, 0, 0])
 
         f = f_prop + fg_b + f_aero
