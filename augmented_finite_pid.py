@@ -19,7 +19,7 @@ class PID_fixed_wing():
         self.fixed_wing = PyFly("/home/dimitria/fixed_wing/pyfly/pyfly/pyfly_config.json", "/home/dimitria/fixed_wing/pyfly/pyfly/x8_param.mat")
         self.fixed_wing.seed(0)
         self.fixed_wing.reset(state={"roll": -0.5, "pitch": 0.15})
-        self.t_max = 30
+        self.t_max = 3
         self.N = self.t_max*10 #number of points
         self.T = (self.t_max-0)/self.N 
         self.T_p = 30 
@@ -120,13 +120,14 @@ class PID_fixed_wing():
                 self.Car[:,:,i] = np.hstack((x_B.reshape(3,1), y_B.reshape(3,1), z_B.reshape(3,1)))@R.from_euler('xyz', [np.pi/100, 0, 0]).as_matrix()
 
             else:
-                self.Car[:,:,i+1] = np.hstack((x_B.reshape(3,1), y_B.reshape(3,1), z_B.reshape(3,1)))
+                if (i+1) < (self.N-1):
+                    self.Car[:,:,i+1] = np.hstack((x_B.reshape(3,1), y_B.reshape(3,1), z_B.reshape(3,1)))
 
-                if np.linalg.det(self.Car[:,:,i]) != 0 and np.linalg.det(self.Car[:,:,i+1]) != 0:
+                    if np.linalg.det(self.Car[:,:,i]) != 0 and np.linalg.det(self.Car[:,:,i+1]) != 0:
 
-                    self.wr_r[:,i] = so3_R3(logm(np.linalg.inv(self.Car[:,:,i])@self.Car[:,:,i+1]))/self.T
-                else:
-                    self.wr_r[:,i] = np.zeros(3)
+                        self.wr_r[:,i] = so3_R3(logm(np.linalg.inv(self.Car[:,:,i])@self.Car[:,:,i+1]))/self.T
+                    else:
+                        self.wr_r[:,i] = np.zeros(3)
 
     def calc_A_and_B(self,i):
 
@@ -170,7 +171,7 @@ class PID_fixed_wing():
         f = self.fixed_wing.reference_forces(attitude, omega, vel, controls)
 
         self.f[:,0] = f
-        for i in range(0,self.N):
+        for i in range(0,self.N-1):
             self.calc_A_and_B(i)
             self.calc_K_pid(i)
             self.dU[:,i] = -self.K_pid[:,:,i]@self.d_Xi[:,i]
@@ -191,7 +192,7 @@ class PID_fixed_wing():
             self.X[4,i] =self.fixed_wing.state["velocity_v"].value
             self.X[5,i] =self.fixed_wing.state["velocity_w"].value
             self.Cab[:,:,i+1] = self.Cab[:,:,i]@expm(R3_so3(self.X[0:3,i])*self.T)
-            self.dC[:,:,i+1] = self.Cab[:,:,i+1].T@self.Ca_r[:,:,i+1]
+            self.dC[:,:,i+1] = self.Cab[:,:,i+1].T@self.Car[:,:,i+1]
             self.d_v = self.Cab[:,:,i+1].T@(self.va_r[:,i+1] - self.X[3:6,i+1]) 
             self.d_r = self.Cab[:,:,i+1].T@(self.ra_r[:,i+1] - self.X[6:9,i+1]) 
             self.d_Xi[0:9,i+1] = dX_to_dXi(self.dC[:,:,i+1],self.d_v,self.d_r) 
@@ -230,16 +231,14 @@ class PID_fixed_wing():
 
     def plot_controls(self):
         fig = plt.figure()
-        plt.subplot(3, 1, 1)
-        plt.plot(self.t,self.f_T[0,:],label = "thrust")
-        plt.subplot(3, 1, 2)
+        plt.subplot(2, 1, 1)
+        plt.plot(self.t,self.f[0,:],label = "f_x")
+        plt.plot(self.t,self.f[1,:],label = "f_y")
+        plt.plot(self.t,self.f[2,:],label = "f_z")
+        plt.subplot(2, 1, 2)
         plt.plot(self.t,self.wb_b_cont[0,:],label = "omega_p")
         plt.plot(self.t,self.wb_b_cont[1,:],label = "omega_q")
         plt.plot(self.t,self.wb_b_cont[2,:],label = "omega_r")
-        plt.subplot(3, 1, 3)
-        plt.plot(self.t,self.f_A[0,:],label = "f_A_x")
-        plt.plot(self.t,self.f_A[1,:],label = "f_A_y")
-        plt.plot(self.t,self.f_A[2,:],label = "f_A_z")
         plt.show()
 
 if __name__ == "__main__":
