@@ -891,7 +891,9 @@ class PyFly:
                 self.params = json.load(param_file)
         else:
             raise Exception("Unsupported parameter file extension.")
-
+        self.params["C_Y_delta_r"] = 0.01
+        # ic(self.params)
+        # input()
         self.I = np.array([[self.params["Jx"], 0, -self.params["Jxz"]],
                            [0, self.params["Jy"], 0, ],
                            [-self.params["Jxz"], 0, self.params["Jz"]]
@@ -1097,7 +1099,6 @@ class PyFly:
             self.state["Va"].set_value(Va)
             self.state["alpha"].set_value(alpha)
             self.state["beta"].set_value(beta)
-
             for energy_state in self.energy_states:
                 self.state[energy_state].set_value(self.state[energy_state].calculate_value(), save=True)
 
@@ -1299,10 +1300,10 @@ class PyFly:
 
         return f, tau
     
-    def calc_control(self, attitude, vel, omega, f_prop, f_aero):
-        f_lift_s = f_aero[2]
-        f_y = f_aero[1]
-        f_prop = f_prop[0]
+    def calc_control(self, attitude, vel, omega, f):
+        f_lift_s = f[2]
+        f_y = f[1]
+        f_prop_drag = f[0]
 
         Va, alpha, beta = self._calculate_airspeed_factors(attitude, vel)
 
@@ -1318,9 +1319,12 @@ class PyFly:
         C_m_fp = self.params["C_m_fp"]
         C_m_alpha = self.params["C_m_alpha"]
         C_m_0 = self.params["C_m_0"]
-
         sigma = (1 + np.exp(-M * (alpha - a_0)) + np.exp(M * (alpha + a_0))) / (
                     (1 + np.exp(-M * (alpha - a_0))) * (1 + np.exp(M * (alpha + a_0))))
+        C_D_alpha = C_D_p + (1 - sigma) * (self.params["C_L_0"] + self.params["C_L_alpha"] * alpha) ** 2 / (
+                    np.pi * e * ar) + sigma * (2 * np.sign(alpha) * math.pow(np.sin(alpha), 3))
+        C_D_beta = self.params["C_D_beta1"] * beta + self.params["C_D_beta2"] * beta ** 2
+
         
         C_L_alpha_lin = self.params["C_L_0"] + self.params["C_L_alpha"] * alpha
         C_L_alpha = (1 - sigma) * C_L_alpha_lin + sigma * (2 * np.sign(alpha) * np.sin(alpha) ** 2 * np.cos(alpha))
@@ -1337,8 +1341,12 @@ class PyFly:
                 2 * Va) * p + self.params["C_n_r"] * self.params["b"] / (2 * Va) * r )
         rudder = (self.params["C_Y_delta_a"]*C_n - self.params["C_Y_delta_r"]*C_fy)/(self.params["C_Y_delta_a"]*self.params["C_n_delta_r"] - self.params["C_Y_delta_r"]*self.params["C_n_delta_a"])
         aileron = (C_fy - self.params["C_Y_delta_r"]*rudder)/self.params["C_Y_delta_a"]
+        f_drag_s = pre_fac * (
+                            C_D_alpha + C_D_beta + self.params["C_D_q"] * self.params["c"] / (2 * Va) * q + self.params[
+                        "C_D_delta_e"] * elevator ** 2)
+        f_prop = f_prop_drag + f_drag_s
 
-        throttle = (1/self.params["k_motor"]) * np.sqrt(f_prop/(0.5 * self.rho * self.params["S_prop"] * self.params["C_prop"]) - Va**2)
+        throttle = (1/self.params["k_motor"]) * np.sqrt(f_prop/(0.5 * self.rho * self.params["S_prop"] * self.params["C_prop"]) + Va**2)
 
         return np.array([elevator, aileron, rudder, throttle])
 
@@ -1426,7 +1434,7 @@ class PyFly:
         f = f_prop + fg_b + f_aero
         tau = tau_aero + tau_prop
 
-        return f_prop, f_aero
+        return f_prop + f_aero
 
     def _f_attitude_dot(self, t, attitude, omega):
         """
