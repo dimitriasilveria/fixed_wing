@@ -10,7 +10,7 @@ from mpl_toolkits.mplot3d import Axes3D
 from embedding_SO3_sim import Embedding
 import math
 #reference trajectory
-N =10 # number of points
+N =50 # number of points
 r = 2 # radius
 dt = 0.1 # time step
 n_agents = 3
@@ -41,7 +41,7 @@ x_dot[:,0,2] = 1*np.array([-r*w*np.sin(np.deg2rad(20)) ,r*w*np.cos(np.deg2rad(20
 
 embedding = Embedding(r, w,k_phi, 'circle',n_agents,x[:,0],dt)
 
-fixed_wing = PyFly("/home/bitdrones/fixed_wing/pyfly/pyfly/pyfly_config.json", "/home/bitdrones/fixed_wing/pyfly/pyfly/x8_param.mat")
+fixed_wing = PyFly("/home/dimitria/fixed_wing/pyfly/pyfly/pyfly_config.json", "/home/dimitria/fixed_wing/pyfly/pyfly/x8_param.mat")
 fixed_wing.seed(0)
 
 fixed_wing.reset(state={"roll": -0.5, "pitch": 0.15})

@@ -891,9 +891,8 @@ class PyFly:
                 self.params = json.load(param_file)
         else:
             raise Exception("Unsupported parameter file extension.")
-        self.params["C_Y_delta_r"] = 0.01
-        # ic(self.params)
-        # input()
+        self.params["C_Y_delta_r"] = 0.0001
+
         self.I = np.array([[self.params["Jx"], 0, -self.params["Jxz"]],
                            [0, self.params["Jy"], 0, ],
                            [-self.params["Jxz"], 0, self.params["Jz"]]
@@ -1209,7 +1208,7 @@ class PyFly:
         f = + fg_b + Car@f_aero.T + self.params["mass"]*acc.T + f_prop
 
 
-        return f_prop, f_aero
+        return f
     
     def _forces(self, attitude, omega, vel, controls):
         """
@@ -1289,13 +1288,13 @@ class PyFly:
 
         f_aero = np.dot(self._rot_b_v(np.array([0, alpha, beta])), np.array([-f_drag_s, f_y, -f_lift_s]))
         tau_aero = np.array([l, m, n])
-
         # Vd = Va + throttle * (self.params["k_motor"] - Va)
         # f_prop = np.array([0.5 * self.rho * self.params["S_prop"] * self.params["C_prop"] * Vd * (Vd - Va), 0, 0])
         f_prop = np.array([0.5 * self.rho * self.params["S_prop"] * self.params["C_prop"] *  ((self.params["k_motor"]*throttle)**2 - Va**2), 0, 0])
         tau_prop = np.array([-self.params["k_T_P"] * (self.params["k_Omega"] * throttle) ** 2, 0, 0])
 
         f = f_prop + fg_b + f_aero
+        ic(fg_b)
         tau = tau_aero + tau_prop
 
         return f, tau
