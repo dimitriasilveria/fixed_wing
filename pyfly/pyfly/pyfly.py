@@ -582,7 +582,7 @@ class AttitudeQuaternion:
         :param timestep: (int) timestep
         :return: (float or dict) requested euler angles.
         """
-        e0, e1, e2, e3 = self.history[timestep]
+        e1, e2, e3, e0 = self.history[timestep]
         res = {}
         if angle == "roll" or angle == "all":
             res["roll"] = np.arctan2(2 * (e0 * e1 + e2 * e3), e0 ** 2 + e3 ** 2 - e1 ** 2 - e2 ** 2)
@@ -613,7 +613,7 @@ class AttitudeQuaternion:
         e3 = np.sin(psi / 2) * np.cos(theta / 2) * np.cos(phi / 2) - np.cos(psi / 2) * np.sin(theta / 2) * np.sin(
             phi / 2)
 
-        self.quaternion = (e0, e1, e2, e3)
+        self.quaternion = (e1, e2, e3, e0)
 
     def set_value(self, quaternion, save=True):
         """
@@ -892,7 +892,7 @@ class PyFly:
                 self.params = json.load(param_file)
         else:
             raise Exception("Unsupported parameter file extension.")
-        self.params["C_Y_delta_r"] = 0.01
+        self.params["C_Y_delta_r"] = 0.1
 
         self.I = np.array([[self.params["Jx"], 0, -self.params["Jxz"]],
                            [0, self.params["Jy"], 0, ],
@@ -1293,7 +1293,6 @@ class PyFly:
 
         f = f_prop + fg_b + f_aero
         tau = tau_aero + tau_prop
-        ic(f)
         return f, tau
     
     def calc_control(self, attitude, vel, omega, f):
@@ -1335,17 +1334,20 @@ class PyFly:
 
         C_fy = (f_y/pre_fac) - (self.params["C_Y_0"] + self.params["C_Y_beta"] * beta + self.params["C_Y_p"] * self.params["b"] / (2 * Va) * p + self.params["C_Y_r"] * self.params["b"] / (2 * Va) * r)
         C_n = - (self.params["C_n_0"] + self.params["C_n_beta"] * beta + self.params["C_n_p"] * self.params["b"] / (2 * Va) * p + self.params["C_n_r"] * self.params["b"] / (2 * Va) * r )
-        rudder = (self.params["C_Y_delta_a"]*C_n - self.params["C_Y_delta_r"]*C_fy)/(self.params["C_Y_delta_a"]*self.params["C_n_delta_r"] - self.params["C_Y_delta_r"]*self.params["C_n_delta_a"])
+        rudder = (self.params["C_Y_delta_a"]*C_n - self.params["C_n_delta_a"]*C_fy)/(self.params["C_Y_delta_a"]*self.params["C_n_delta_r"] - self.params["C_Y_delta_r"]*self.params["C_n_delta_a"])
         aileron = (C_fy - self.params["C_Y_delta_r"]*rudder)/self.params["C_Y_delta_a"]
         f_drag_s = pre_fac * (C_D_alpha + C_D_beta + self.params["C_D_q"] * self.params["c"] / (2 * Va) * q + self.params["C_D_delta_e"] * elevator ** 2)
         f_prop = f_prop_drag + f_drag_s
 
         throttle = (1/self.params["k_motor"]) * np.sqrt(f_prop/(0.5 * self.rho * self.params["S_prop"] * self.params["C_prop"]) + Va**2)
-
+        ic(rudder, aileron, elevator, throttle)
+        ic(self.params["C_L_q"] * self.params["c"] / (2 * Va) * q)
         aileron = np.clip(aileron,np.deg2rad(-30),np.deg2rad(30))
         elevator = np.clip(elevator,np.deg2rad(-30),np.deg2rad(35))
         rudder = np.clip(rudder,np.deg2rad(-30),np.deg2rad(30))
         throttle = np.clip(throttle,0,1)
+        ic(rudder, aileron, elevator, throttle)
+        input()
         return np.array([elevator, aileron, rudder, throttle])
 
     def reference_forces(self, attitude, omega, vel, controls):
@@ -1374,7 +1376,7 @@ class PyFly:
 
         pre_fac = 0.5 * self.rho * Va ** 2 * self.params["S_wing"]
 
-        e0, e1, e2, e3 = attitude
+        e1, e2, e3, e0 = attitude
         fg_b = self.params["mass"] * self.g * np.array([2 * (e1 * e3 - e2 * e0),
                                                         2 * (e2 * e3 + e1 * e0),
                                                         e3 ** 2 + e0 ** 2 - e1 ** 2 - e2 ** 2])
@@ -1496,7 +1498,7 @@ class PyFly:
         :param attitude: ([float]) attitude quaternion
         :return: ([float]) right hand side of position differntial equation.
         """
-        e0, e1, e2, e3 = attitude
+        e1, e2, e3, e0 = attitude
         T = np.array([[e1 ** 2 + e0 ** 2 - e2 ** 2 - e3 ** 2, 2 * (e1 * e2 - e3 * e0), 2 * (e1 * e3 + e2 * e0)],
                       [2 * (e1 * e2 + e3 * e0), e2 ** 2 + e0 ** 2 - e1 ** 2 - e3 ** 2, 2 * (e2 * e3 - e1 * e0)],
                       [2 * (e1 * e3 - e2 * e0), 2 * (e2 * e3 + e1 * e0), e3 ** 2 + e0 ** 2 - e1 ** 2 - e2 ** 2]
@@ -1530,7 +1532,7 @@ class PyFly:
                  np.cos(phi) * np.sin(th) * np.sin(psi) - np.sin(phi) * np.cos(psi), np.cos(phi) * np.cos(th)]
             ])
         elif len(attitude) == 4:
-            e0, e1, e2, e3 = attitude
+            e1, e2, e3, e0 = attitude
             return np.array([[-1 + 2 * (e0 ** 2 + e1 ** 2), 2 * (e1 * e2 + e3 * e0), 2 * (e1 * e3 - e2 * e0)],
                              [2 * (e1 * e2 - e3 * e0), -1 + 2 * (e0 ** 2 + e2 ** 2), 2 * (e2 * e3 + e1 * e0)],
                              [2 * (e1 * e3 + e2 * e0), 2 * (e2 * e3 - e1 * e0), -1 + 2 * (e0 ** 2 + e3 ** 2)]])
