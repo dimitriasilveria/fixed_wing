@@ -246,7 +246,7 @@
     }
   ],
   "actuation": {
-    "dynamics": ["elevon_right", "elevon_left", "throttle"],
+    "dynamics": ["elevon_right", "elevon_left", "rudder", "throttle"],
     "inputs": ["elevator", "aileron", "rudder","throttle"]
   },
   "plots": [

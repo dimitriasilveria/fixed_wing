@@ -481,20 +481,21 @@ class Actuation:
             dynamics_commands = {"elevon_right": elevon_r_c, "elevon_left": elevon_l_c}
 
         for state in self.dynamics:
+            
             if state in self.input_indices:
                 state_c = commands[self.input_indices[state]]
             else:  # Elevail inputs with elevon dynamics
                 state_c = dynamics_commands[state]
             self.states[state].set_command(state_c)
             dynamics_commands[state] = self.states[state].command
-
+            
         # The elevator and aileron commands constrained by limitatons on physical elevons
         if self.elevon_dynamics:
             elev_c, ail_c = self._map_elevon_to_elevail(er=dynamics_commands["elevon_right"],
                                                         el=dynamics_commands["elevon_left"])
             self.states["elevator"].set_command(elev_c)
             self.states["aileron"].set_command(ail_c)
-
+           
         for state, i in self.input_indices.items():
             commands[i] = self.states[state].command
 
@@ -891,7 +892,7 @@ class PyFly:
                 self.params = json.load(param_file)
         else:
             raise Exception("Unsupported parameter file extension.")
-        self.params["C_Y_delta_r"] = 0.0001
+        self.params["C_Y_delta_r"] = 0.01
 
         self.I = np.array([[self.params["Jx"], 0, -self.params["Jxz"]],
                            [0, self.params["Jy"], 0, ],
@@ -935,7 +936,6 @@ class PyFly:
 
         self.state["attitude"] = AttitudeQuaternion()
         self.attitude_states_with_constraints = []
-
         self.actuation = Actuation(model_inputs=self.model_inputs,
                                    actuator_inputs=self.cfg["actuation"]["inputs"],
                                    dynamics=self.cfg["actuation"]["dynamics"])
@@ -1079,7 +1079,6 @@ class PyFly:
 
         # Record command history and apply conditions on actuator setpoints
         control_inputs = self.actuation.set_and_constrain_commands(commands)
-
         y0 = list(self.state["attitude"].value)
         y0.extend(self.get_states_vector(["omega_p", "omega_q", "omega_r", "position_n", "position_e", "position_d",
                                           "velocity_u", "velocity_v", "velocity_w"]))
@@ -1221,8 +1220,7 @@ class PyFly:
         :return: ([float], [float]) forces and moments in x, y, z of aircraft frame
         """
         elevator, aileron, rudder, throttle = controls
-        #elevator, aileron, rudder, throttle = self.calc_control(attitude, vel, omega, f_prop_ref, f_aero_ref)
-        
+       
 
         p, q, r = omega
 
@@ -1238,7 +1236,7 @@ class PyFly:
 
         pre_fac = 0.5 * self.rho * Va ** 2 * self.params["S_wing"]
 
-        e0, e1, e2, e3 = attitude
+        e1, e2, e3, e0 = attitude
         fg_b = self.params["mass"] * self.g * np.array([2 * (e1 * e3 - e2 * e0),
                                                         2 * (e2 * e3 + e1 * e0),
                                                         e3 ** 2 + e0 ** 2 - e1 ** 2 - e2 ** 2])
@@ -1294,12 +1292,12 @@ class PyFly:
         tau_prop = np.array([-self.params["k_T_P"] * (self.params["k_Omega"] * throttle) ** 2, 0, 0])
 
         f = f_prop + fg_b + f_aero
-        ic(fg_b)
         tau = tau_aero + tau_prop
-
+        ic(f)
         return f, tau
     
     def calc_control(self, attitude, vel, omega, f):
+
         f_lift_s = f[2]
         f_y = f[1]
         f_prop_drag = f[0]
@@ -1336,17 +1334,18 @@ class PyFly:
         elevator = ((f_lift_s/pre_fac) - (C_L_alpha + self.params["C_L_q"] * self.params["c"] / (2 * Va) * q))/self.params["C_L_delta_e"]
 
         C_fy = (f_y/pre_fac) - (self.params["C_Y_0"] + self.params["C_Y_beta"] * beta + self.params["C_Y_p"] * self.params["b"] / (2 * Va) * p + self.params["C_Y_r"] * self.params["b"] / (2 * Va) * r)
-        C_n = - (self.params["C_n_0"] + self.params["C_n_beta"] * beta + self.params["C_n_p"] * self.params["b"] / (
-                2 * Va) * p + self.params["C_n_r"] * self.params["b"] / (2 * Va) * r )
+        C_n = - (self.params["C_n_0"] + self.params["C_n_beta"] * beta + self.params["C_n_p"] * self.params["b"] / (2 * Va) * p + self.params["C_n_r"] * self.params["b"] / (2 * Va) * r )
         rudder = (self.params["C_Y_delta_a"]*C_n - self.params["C_Y_delta_r"]*C_fy)/(self.params["C_Y_delta_a"]*self.params["C_n_delta_r"] - self.params["C_Y_delta_r"]*self.params["C_n_delta_a"])
         aileron = (C_fy - self.params["C_Y_delta_r"]*rudder)/self.params["C_Y_delta_a"]
-        f_drag_s = pre_fac * (
-                            C_D_alpha + C_D_beta + self.params["C_D_q"] * self.params["c"] / (2 * Va) * q + self.params[
-                        "C_D_delta_e"] * elevator ** 2)
+        f_drag_s = pre_fac * (C_D_alpha + C_D_beta + self.params["C_D_q"] * self.params["c"] / (2 * Va) * q + self.params["C_D_delta_e"] * elevator ** 2)
         f_prop = f_prop_drag + f_drag_s
 
         throttle = (1/self.params["k_motor"]) * np.sqrt(f_prop/(0.5 * self.rho * self.params["S_prop"] * self.params["C_prop"]) + Va**2)
 
+        aileron = np.clip(aileron,np.deg2rad(-30),np.deg2rad(30))
+        elevator = np.clip(elevator,np.deg2rad(-30),np.deg2rad(35))
+        rudder = np.clip(rudder,np.deg2rad(-30),np.deg2rad(30))
+        throttle = np.clip(throttle,0,1)
         return np.array([elevator, aileron, rudder, throttle])
 
     def reference_forces(self, attitude, omega, vel, controls):
