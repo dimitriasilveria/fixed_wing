@@ -36,7 +36,7 @@ def so3_R3(log_R):
 
 def SE3_se3_back(SE3):    
     R=SE3[0:3,0:3]
-    theta= np.arccos((np.trace(R)-1)/2)
+    theta= np.arccos(np.clip(((np.trace(R)-1)/2),-1,1))
     if theta !=0:
         lnR=logm(R) #(theta/(2*sin(theta)))*(R-R')
     else:
