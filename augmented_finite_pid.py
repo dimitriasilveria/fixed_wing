@@ -26,7 +26,7 @@ class PID_fixed_wing():
         self.n_agents = 1
         self.mb = self.fixed_wing.params["mass"]
         self.g = self.fixed_wing.g
-        self.ga = np.array([0, 0, self.g])
+        self.ga = np.array([0, 0, -self.g])
 
         self.Jb_Bz = np.diag([0.0112,0.01123,0.02108]) 
         self.D = np.diag([0.605,0.44,0.275]) 
@@ -52,8 +52,8 @@ class PID_fixed_wing():
         #controller and state-space matrices ###################################
         self.A = np.zeros((9,9,self.N))
         self.B = np.zeros((9,6,self.N)) #check this
-        self.r = 121
-        self.T_p = 29 
+        self.r = 191
+        self.T_p = 46 
         self.ra_r = np.vstack((self.r*np.cos(2*np.pi*self.t/self.T_p), self.r*np.sin(2*np.pi*self.t/self.T_p), -1*np.ones_like(self.t)))  #reference position
         self.va_r = np.vstack(((2*np.pi/self.T_p)*(-self.r*np.sin(2*np.pi*self.t/self.T_p)), (2*np.pi/self.T_p)*self.r*np.cos(2*np.pi*self.t/self.T_p), 0.6*np.zeros_like(self.t))) #reference linear velocity
         self.va_r_dot = np.vstack(((2*np.pi/self.T_p)**2*(-self.r*np.cos(2*np.pi*self.t/self.T_p)), (2*np.pi/self.T_p)**2*(-self.r*np.sin(2*np.pi*self.t/self.T_p)), np.zeros_like(self.t))) #reference linear acceleration 
@@ -103,7 +103,9 @@ class PID_fixed_wing():
         ac = np.cross(self.va_r[0:2,i],self.va_r_dot[0:2,i])/v_xy_norm
 
         #roll (phi)
-        phi = np.arctan2(ac,self.g)
+        phi = np.arctan2(-ac,self.g)
+        ic(np.rad2deg(phi))
+        input()
 
             # Rotation matrices using Z-Y-X intrinsic rotations
         Rz = np.array([
@@ -127,7 +129,9 @@ class PID_fixed_wing():
 
 
         self.Car[:,:,i] =  Rz @ Ry @ Rx
-        self.f_r[:,i] = self.Car[:,:,i].T@(self.mb*self.va_r_dot[:,i] - self.mb*self.g*self.z_w)
+        self.f_r[:,i] = self.Car[:,:,i]@(self.mb*self.va_r_dot[:,i] - self.mb*self.g*self.z_w)
+        ic(self.Car[:,:,i]@(self.mb*self.va_r_dot[:,i]))
+        input()
         # norm_aux = np.linalg.norm(self.va_r_dot[:,i]-(self.va_r_dot[:,i]@self.va_r[:,i])*self.va_r[:,i]) 
         # if (norm_x_B != 0) and (norm_aux != 0):
         #     x_B = self.va_r[:,i]/norm_x_B
@@ -212,8 +216,7 @@ class PID_fixed_wing():
             self.d_r = self.Cab[:,:,0].T@(self.ra_r[:,i] - self.X[6:9,i]) 
             self.d_Xi[0:9,0] = dX_to_dXi(self.dC[:,:,i],self.d_v,self.d_r) 
     
-        attitude = R.from_matrix(self.Car[:,:,0]).as_quat()
-        self.fixed_wing.state["attitude"].set_value(attitude)
+
         omega = self.wr_r[:,0]
         vel = self.va_r[:,0]
 
@@ -232,9 +235,6 @@ class PID_fixed_wing():
             self.wb_b_cont[:,i] = self.dC[:,:,i]@self.wr_r[:,i] #- self.dU[3:6,i]
             #self.wb_b_cont[:,i] = np.clip(self.wb_b_cont[:,i],-np.pi/3,np.pi/3)
             attitude = R.from_matrix(self.Car[:,:,i]).as_quat()
-            ic(self.wb_b_cont[:,i])
-            ic(self.fixed_wing.state["omega_p"].value, self.fixed_wing.state["omega_q"].value, self.fixed_wing.state["omega_r"].value)
-            input()
             controls = self.fixed_wing.calc_control(attitude, self.va_r[:,i], self.wb_b_cont[:,i], self.f[:,i]) #should I use Cab or Car? 
             _, _ = self.fixed_wing.step(controls)
             #self.f_r[:,i+1] = self.fixed_wing.reference_forces(attitude, omega, vel, controls)
