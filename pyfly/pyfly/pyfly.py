@@ -7,7 +7,8 @@ import json
 import matplotlib.pyplot as plt
 import matplotlib.gridspec
 from icecream import ic
-import pickle as pkl
+import pandas as pd
+import os
 from scipy.spatial.transform import Rotation as R
 
 
@@ -895,18 +896,27 @@ class PyFly:
                 self.params = json.load(param_file)
         else:
             raise Exception("Unsupported parameter file extension.")
-        self.params["C_Y_delta_r"] = 0.35  # Keep as is
+        self.params["C_Y_delta_r"] = 0.35 # Keep as is
         self.params["C_n_delta_r"] = 0.1563  # Adjusted for stability
         self.params["C_n_delta_a"] = -0.01005  # More negative for improved yaw response
         # self.params["C_L_delta_e"] = 0.35
         # Elevator Fix: Improve control authority
         self.params["C_L_delta_e"] = 0.42  
 
-        # Throttle Fix 1: Reduce drag further
-        self.params["C_D_0"] = 0.012  
+        # # Throttle Fix 1: Reduce drag further
+        # self.params["C_D_0"] = 0.012  
 
-        # Throttle Fix 2: Increase motor gain
-        self.params["k_motor"] = 42
+        # # Throttle Fix 2: Increase motor gain
+        # self.params["k_motor"] = 60
+        self.params["C_Y_delta_a"] = 0.19
+        self.params["S_prop"] = 0.3027
+        # self.params["C_l_p"] = -0.1  # Further reduce roll damping
+        # self.params["C_l_delta_a"] = 0.6  # Further improve aileron authority
+        # self.params["C_m_q"] = -1.3  # Improve pitch stability
+        # self.params["Jxz"] = 0.8  # Reduce roll-pitch coupling effects
+        # self.params["r_cg"] = np.array([0, -0.02, 0])
+        # for param in self.params:
+        #     ic(param, self.params[param])
 
         self.I = np.array([[self.params["Jx"], 0, -self.params["Jxz"]],
                            [0, self.params["Jy"], 0, ],
@@ -1100,8 +1110,10 @@ class PyFly:
         y0 = np.array(y0)
         try:
             sol = scipy.integrate.solve_ivp(fun=lambda t, y: self._dynamics(t, y), t_span=(0, self.dt),
-                                            y0=y0,t_eval=[self.dt])
+                                            y0=y0,t_eval=[self.dt])#,max_step=self.dt / 10)
             self._set_states_from_ode_solution(sol.y[:, -1], save=True)
+            # y_next = self._runge_kutta4_step(y0, self.dt)
+            # self._set_states_from_ode_solution(y_next, save=True)
 
             Theta = self.get_states_vector(["roll", "pitch", "yaw"])
             vel = np.array(self.get_states_vector(["velocity_u", "velocity_v", "velocity_w"]))
@@ -1117,6 +1129,10 @@ class PyFly:
         except ConstraintException as e:
             success = False
             info = {"termination": e.variable}
+        except TypeError as e:
+            ic(y0)
+            print(f"TypeError in step method: {e}")
+            success = False
 
         self.cur_sim_step += 1
 
@@ -1149,7 +1165,24 @@ class PyFly:
             res[state] = self.state[state].history
 
         np.save(path, res)
+    def _runge_kutta4_step(self, y, dt):
+        """
+        Perform one step of 4th order Runge-Kutta integration.
+        
+        :param y: (numpy array) current state vector
+        :param control_sp: (numpy array) control setpoints
+        :param dt: (float) time step
+        :return: (numpy array) next state vector
+        """
 
+        def dynamics_wrapper(t, y):
+            return self._dynamics(t, y)
+
+        k1 = dynamics_wrapper(0, y)
+        k2 = dynamics_wrapper(dt / 2, y + (dt / 2) * k1)
+        k3 = dynamics_wrapper(dt / 2, y + (dt / 2) * k2)
+        k4 = dynamics_wrapper(dt, y + dt * k3)
+        return y + (dt / 6) * (k1 + 2 * k2 + 2 * k3 + k4)
     def _dynamics(self, t, y, control_sp=None):
 
         """
@@ -1165,13 +1198,11 @@ class PyFly:
             self._set_states_from_ode_solution(y, save=False)
 
         attitude = y[:4]
-
         omega = self.get_states_vector(["omega_p", "omega_q", "omega_r"])
         vel = np.array(self.get_states_vector(["velocity_u", "velocity_v", "velocity_w"]))
 
         u_states = self.get_states_vector(self.model_inputs,attribute="command")
         f, tau = self._forces(attitude, omega, vel, u_states)
-
         return np.concatenate([
             self._f_attitude_dot(t, attitude, omega),
             self._f_omega_dot(t, omega, tau),
@@ -1179,50 +1210,6 @@ class PyFly:
             self._f_v_dot(t, vel, omega, f),
             self._f_u_dot(t, control_sp)
         ])
-    def simplified_forces(self, attitude, Car, vel, acc, w_r):
-        """
-        Get aerodynamic forces acting on aircraft.
-
-        :param attitude: ([float]) attitude quaternion of aircraft
-        :param omega: ([float]) angular velocity of aircraft
-        :param vel: ([float]) linear velocity of aircraft
-        :param controls: ([float]) state of actutators
-        :return: ([float], [float]) forces and moments in x, y, z of aircraft frame
-        """
-
-
-        if self.wind.turbulence:
-            p_w, q_w, r_w = self.wind.get_turbulence_angular(self.cur_sim_step)
-            p, q, r = p - p_w, q - q_w, r - r_w
-
-        Va, alpha, beta = self._calculate_airspeed_factors(attitude, vel)
-        # Va = self.state["Va"].apply_conditions(Va)
-        # alpha = self.state["alpha"].apply_conditions(alpha)
-        # beta = self.state["beta"].apply_conditions(beta)
-        pre_fac = 0.5 * self.rho * Va ** 2 * self.params["S_wing"]
-
-        fg_b = self.params["mass"] * np.array([0,0,self.g]).T 
-                                                    # * np.array([2 * (e1 * e3 - e2 * e0),
-                                                    #     2 * (e2 * e3 + e1 * e0),
-                                                    #     e3 ** 2 + e0 ** 2 - e1 ** 2 - e2 ** 2])
-
-        # Nonlinear version of lift coefficient with stall
-        a_0 = self.params["a_0"]
-        M = self.params["M"]
-        e = self.params["e"]  # oswald efficiency
-        b = self.params["b"] # wingspan
-        ar = b**2/self.params["S_wing"]
-
-        C_L = self.params["C_L_0"] + self.params["C_L_alpha"] * alpha
-        C_D = self.params["C_D_0"]  + (1/(np.pi * e * ar)) * C_L ** 2 
-        C_B = self.params["C_n_beta"]*beta
-        
-        f_aero = pre_fac * np.array([-C_D, C_B, -C_L])
-        f_prop = self.params["mass"]*acc.T + Car@np.array([-C_D, 0, 0]).T
-        f = + fg_b + Car@f_aero.T + self.params["mass"]*acc.T + f_prop
-
-
-        return f
     
     def _forces(self, attitude, omega, vel, controls):
         """
@@ -1309,12 +1296,27 @@ class PyFly:
         tau_prop = np.array([-self.params["k_T_P"] * (self.params["k_Omega"] * throttle) ** 2, 0, 0])
         f = f_prop + fg_b + f_aero
         tau = tau_aero + tau_prop
+
+        df_new = pd.DataFrame([{'f_lift_s': f_lift_s, 'f_z': f[2], "f_gb": fg_b}])
+        file_path = 'actual_force.csv'
+        if os.path.exists(file_path):
+            df_new.to_csv(file_path, mode='a', header=False, index=False)
+        else:
+            df_new.to_csv(file_path, mode='w', header=True, index=False)
+
+        # df_new = pd.DataFrame([{'elevator:': elevator, 'aileron': aileron, 'rudder': rudder, 'throttle': throttle}])
+        # file_path = 'actual_commands.csv'
+        # if os.path.exists(file_path):
+        #     df_new.to_csv(file_path, mode='a', header=False, index=False)
+        # else:
+        #     df_new.to_csv(file_path, mode='w', header=True, index=False)
+
         # ic(f_prop, fg_b,-f_drag_s, f_y, -f_lift_s)
         return f, tau
     
     def calc_control(self, attitude, vel, omega, f):
 
-        f_lift_s = f[2]
+        f_lift_s = -f[2]
         f_y = f[1]
         f_prop_drag = f[0]
 
@@ -1357,15 +1359,48 @@ class PyFly:
         f_prop = f_prop_drag + f_drag_s
         
         throttle = (1/self.params["k_motor"]) * np.sqrt(f_prop/(0.5 * self.rho * self.params["S_prop"] * self.params["C_prop"]) + Va**2)
-        ic(elevator,aileron,rudder,throttle)
+        
+        # df_new = pd.DataFrame([{'elevator:': elevator, 'aileron': aileron, 'rudder': rudder, 'throttle': throttle}])
+        # file_path = 'desired_commands.csv'
+        # if os.path.exists(file_path):
+        #     df_new.to_csv(file_path, mode='a', header=False, index=False)
+        # else:
+        #     df_new.to_csv(file_path, mode='w', header=True, index=False)
+
+        # ic(elevator, aileron, rudder, throttle)
+        # ic(omega,np.array([elevator, aileron, rudder, throttle]),Va)
+        # ic(f_y,aileron)
+        # ic(f_drag_s,f_prop_drag,f_prop)
+        
+        if aileron > np.deg2rad(30) or aileron < np.deg2rad(-30):
+            ic('Aileron out of bounds')
+            ic(aileron)
+
+            
+        if elevator > np.deg2rad(35) or elevator < np.deg2rad(-30):
+            ic('Elevator out of bounds')
+            ic(elevator)
+        if rudder > np.deg2rad(30) or rudder < np.deg2rad(-30):
+            ic('Rudder out of bounds')
+            ic(rudder)
+        if throttle > 1 or throttle < 0:
+            ic(throttle)
+            ic('Throttle out of bounds')
         aileron = np.clip(aileron,np.deg2rad(-30),np.deg2rad(30))
         elevator = np.clip(elevator,np.deg2rad(-30),np.deg2rad(35))
         rudder = np.clip(rudder,np.deg2rad(-30),np.deg2rad(30))
         throttle = np.clip(throttle,0,1)
-        ic(elevator,aileron,rudder,throttle)
-        # ic(f_prop , f_prop_drag , f_drag_s)
-
+        # ic(elevator, aileron, rudder, throttle)
         # input()
+        df_new = pd.DataFrame([{'f_lift_s': f_lift_s}])
+        file_path = 'desired_force.csv'
+        if os.path.exists(file_path):
+            df_new.to_csv(file_path, mode='a', header=False, index=False)
+        else:
+            df_new.to_csv(file_path, mode='w', header=True, index=False)
+
+        
+
         return np.array([elevator, aileron, rudder, throttle])
 
     def reference_forces(self, attitude, omega, vel, controls):
@@ -1469,7 +1504,8 @@ class PyFly:
                       [q, -r, 0, p],
                       [r, q, -p, 0]
                       ])
-        return 0.5 * np.dot(T, attitude)
+        # return 0.5 * np.dot(T, attitude)
+        return self.state["attitude"].value
 
     def _f_omega_dot(self, t, omega, tau):
         """
@@ -1480,14 +1516,15 @@ class PyFly:
         :param tau: ([float]) moments acting on aircraft
         :return: ([float]) right hand side of angular velocity differential equation.
         """
-        return np.array([
-            self.gammas[1] * omega[0] * omega[1] - self.gammas[2] * omega[1] * omega[2] + self.gammas[3] * tau[0] +
-            self.gammas[4] * tau[2],
-            self.gammas[5] * omega[0] * omega[2] - self.gammas[6] * (omega[0] ** 2 - omega[2] ** 2) + tau[1] / self.I[
-                1, 1],
-            self.gammas[7] * omega[0] * omega[1] - self.gammas[1] * omega[1] * omega[2] + self.gammas[4] * tau[0] +
-            self.gammas[8] * tau[2]
-        ])
+        # return np.array([
+        #     self.gammas[1] * omega[0] * omega[1] - self.gammas[2] * omega[1] * omega[2] + self.gammas[3] * tau[0] +
+        #     self.gammas[4] * tau[2],
+        #     self.gammas[5] * omega[0] * omega[2] - self.gammas[6] * (omega[0] ** 2 - omega[2] ** 2) + tau[1] / self.I[
+        #         1, 1],
+        #     self.gammas[7] * omega[0] * omega[1] - self.gammas[1] * omega[1] * omega[2] + self.gammas[4] * tau[0] +
+        #     self.gammas[8] * tau[2]
+        # ])
+        return np.array([self.state["omega_p"].value, self.state["omega_q"].value, self.state["omega_r"].value])
 
     def _f_v_dot(self, t, v, omega, f):
         """
@@ -1521,7 +1558,9 @@ class PyFly:
                       [2 * (e1 * e2 + e3 * e0), e2 ** 2 + e0 ** 2 - e1 ** 2 - e3 ** 2, 2 * (e2 * e3 - e1 * e0)],
                       [2 * (e1 * e3 - e2 * e0), 2 * (e2 * e3 + e1 * e0), e3 ** 2 + e0 ** 2 - e1 ** 2 - e2 ** 2]
                       ])
+
         return np.dot(T, v)
+        #return np.array([self.state["velocity_u"].value, self.state["velocity_v"].value, self.state["velocity_w"].value])
 
     def _f_u_dot(self, t, setpoints):
         """
@@ -1624,7 +1663,14 @@ class PyFly:
         self.state["velocity_v"].set_value(ode_sol[start_i + 7], save=save)
         self.state["velocity_w"].set_value(ode_sol[start_i + 8], save=save)
         self.actuation.set_states(ode_sol[start_i + 9:], save=save)
-
+        #printing states
+        Rot = R.from_quat(self.state["attitude"].value).as_matrix()
+        # ic(self.state["omega_p"].value,self.state["omega_q"].value,self.state["omega_r"].value)
+        # ic(self.state["position_n"].value,self.state["position_e"].value,self.state["position_d"].value)
+        # ic(self.state["velocity_u"].value,self.state["velocity_v"].value,self.state["velocity_w"].value)
+        # ic(Rot@np.array([self.state["velocity_u"].value,self.state["velocity_v"].value,self.state["velocity_w"].value]))
+        # ic(self.state["attitude"].value)
+        # input("states after ode")
 
 if __name__ == "__main__":
     from dryden import DrydenGustModel
