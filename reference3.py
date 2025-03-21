@@ -44,32 +44,57 @@ for i in range(N-1):
 
 
         # Normalize velocity vector
-        v_norm = va_r[:, i] / np.linalg.norm(va_r[:, i])
-        v_xy_norm = np.linalg.norm(va_r[0:2, i])  # Velocity magnitude in XY plane
+        v_norm = va_r[:,i]/np.linalg.norm(va_r[:,i])
+        v_xy_norm = np.linalg.norm(va_r[0:2,i])
+        # a_c = v_norm**2/r
+        #roll (phi)
+        phi = np.arctan2(-np.linalg.norm(va_r[:,i])**2,g*r)
+        #correcting the acceleration
+        # va_r_dot[:,i] = va_r_dot[:,i] - np.array([0,0,g - (g/np.cos(phi))]) 
+        #yaw (psi)
 
-        # Compute centripetal acceleration
-        v_mag = np.linalg.norm(va_r[:, i])  # Total velocity magnitude
-        a_c = v_mag**2 / r  # Corrected centripetal acceleration
+        psi = np.arctan2(v_norm[1],v_norm[0])
+        #pitch (theta)
+        theta = np.arctan2(va_r[2,i],v_xy_norm)
+        #ccentripetal acceleration component
+        # ac = np.cross(va_r[0:2,i],va_r_dot[0:2,i])/v_xy_norm
 
-        # Compute roll angle (phi)
-        phi = np.arctan2(-a_c, g)  # Corrected roll formula
 
         if i == 0:
-            print(f"Roll angle (phi): {np.rad2deg(phi)} degrees")
+            ic(np.rad2deg(phi))
 
-        # Correct acceleration to enforce banking
-        va_r_dot[2, i] += g * (1 - 1 / np.cos(phi))  # Apply correction
 
-        # Compute the UAV body-frame vectors
-        x_b = v_norm  # Forward direction
-        z_b = - (np.array([0, 0, g]) - va_r_dot[:, i]) 
-        z_b /= np.linalg.norm(z_b)  # Downward direction
+            # Rotation matrices using Z-Y-X intrinsic rotations
+        Rz = np.array([
+            [np.cos(psi), np.sin(psi), 0],
+            [-np.sin(psi), np.cos(psi),  0],
+            [0,           0,            1]
+        ])
 
-        y_b = np.cross(z_b, x_b)  # Rightward direction
-        y_b /= np.linalg.norm(y_b)  # Normalize
+        Ry = np.array([
+            [np.cos(theta), 0, -np.sin(theta)],
+            [0,             1, 0],
+            [np.sin(theta),0, np.cos(theta)]
+        ])
 
-        # Construct the Direction Cosine Matrix (DCM)
-        Car[:, :, i] = np.hstack((x_b.reshape(3, 1), y_b.reshape(3, 1), z_b.reshape(3, 1)))
+        Rx = np.array([
+            [1, 0,          0],
+            [0, np.cos(phi), np.sin(phi)],
+            [0, -np.sin(phi),  np.cos(phi)]
+        ])
+
+        Rx_180 = np.array([
+            [1, 0,          0],
+            [0, np.cos(np.pi), -np.sin(np.pi)],
+            [0, np.sin(np.pi),  np.cos(np.pi)]])
+        # Rz_180 = np.array([
+        #     [np.cos(-np.pi), -np.sin(-np.pi), 0],
+        #     [np.sin(-np.pi), np.cos(-np.pi),  0],
+        #     [0,           0,            1]
+        # ])
+
+
+        Car[:,:,i] =  (Rx @ Ry @ Rz).T
         if np.linalg.det(Car[:,:,i]) != 0 and np.linalg.det(Car[:,:,i+1]) != 0:
 
             Wr_r[:] = so3_R3(logm(np.linalg.inv(Car[:,:,i])@Car[:,:,i+1]))/dt

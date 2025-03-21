@@ -909,7 +909,7 @@ class PyFly:
         # # Throttle Fix 2: Increase motor gain
         # self.params["k_motor"] = 60
         self.params["C_Y_delta_a"] = 0.19
-        self.params["S_prop"] = 0.3027
+        self.params["S_prop"] = 0.4027
         # self.params["C_l_p"] = -0.1  # Further reduce roll damping
         # self.params["C_l_delta_a"] = 0.6  # Further improve aileron authority
         # self.params["C_m_q"] = -1.3  # Improve pitch stability
@@ -1109,11 +1109,11 @@ class PyFly:
         y0.extend(self.actuation.get_values())
         y0 = np.array(y0)
         try:
-            sol = scipy.integrate.solve_ivp(fun=lambda t, y: self._dynamics(t, y), t_span=(0, self.dt),
-                                            y0=y0,t_eval=[self.dt])#,max_step=self.dt / 10)
-            self._set_states_from_ode_solution(sol.y[:, -1], save=True)
-            # y_next = self._runge_kutta4_step(y0, self.dt)
-            # self._set_states_from_ode_solution(y_next, save=True)
+            # sol = scipy.integrate.solve_ivp(fun=lambda t, y: self._dynamics(t, y), t_span=(0, self.dt),
+            #                                 y0=y0,t_eval=[self.dt])#,max_step=self.dt / 10)
+            # self._set_states_from_ode_solution(sol.y[:, -1], save=True)
+            y_next = self._runge_kutta4_step(y0, self.dt)
+            self._set_states_from_ode_solution(y_next, save=True)
 
             Theta = self.get_states_vector(["roll", "pitch", "yaw"])
             vel = np.array(self.get_states_vector(["velocity_u", "velocity_v", "velocity_w"]))
@@ -1516,15 +1516,15 @@ class PyFly:
         :param tau: ([float]) moments acting on aircraft
         :return: ([float]) right hand side of angular velocity differential equation.
         """
-        # return np.array([
-        #     self.gammas[1] * omega[0] * omega[1] - self.gammas[2] * omega[1] * omega[2] + self.gammas[3] * tau[0] +
-        #     self.gammas[4] * tau[2],
-        #     self.gammas[5] * omega[0] * omega[2] - self.gammas[6] * (omega[0] ** 2 - omega[2] ** 2) + tau[1] / self.I[
-        #         1, 1],
-        #     self.gammas[7] * omega[0] * omega[1] - self.gammas[1] * omega[1] * omega[2] + self.gammas[4] * tau[0] +
-        #     self.gammas[8] * tau[2]
-        # ])
-        return np.array([self.state["omega_p"].value, self.state["omega_q"].value, self.state["omega_r"].value])
+        return np.array([
+            self.gammas[1] * omega[0] * omega[1] - self.gammas[2] * omega[1] * omega[2] + self.gammas[3] * tau[0] +
+            self.gammas[4] * tau[2],
+            self.gammas[5] * omega[0] * omega[2] - self.gammas[6] * (omega[0] ** 2 - omega[2] ** 2) + tau[1] / self.I[
+                1, 1],
+            self.gammas[7] * omega[0] * omega[1] - self.gammas[1] * omega[1] * omega[2] + self.gammas[4] * tau[0] +
+            self.gammas[8] * tau[2]
+        ])
+        # return np.array([self.state["omega_p"].value, self.state["omega_q"].value, self.state["omega_r"].value])
 
     def _f_v_dot(self, t, v, omega, f):
         """
@@ -1558,8 +1558,15 @@ class PyFly:
                       [2 * (e1 * e2 + e3 * e0), e2 ** 2 + e0 ** 2 - e1 ** 2 - e3 ** 2, 2 * (e2 * e3 - e1 * e0)],
                       [2 * (e1 * e3 - e2 * e0), 2 * (e2 * e3 + e1 * e0), e3 ** 2 + e0 ** 2 - e1 ** 2 - e2 ** 2]
                       ])
-
-        return np.dot(T, v)
+        result = np.dot(T, v)
+        df_new = pd.DataFrame([{'result_x': result[0], 'result_y': result[1], 'result_z': result[2]}])
+        file_path = 'result.csv'
+        if os.path.exists(file_path):
+            df_new.to_csv(file_path, mode='a', header=False, index=False)
+        else:
+            df_new.to_csv(file_path, mode='w', header=True, index=False)
+        return result
+        #return np.dot(T, v)
         #return np.array([self.state["velocity_u"].value, self.state["velocity_v"].value, self.state["velocity_w"].value])
 
     def _f_u_dot(self, t, setpoints):
