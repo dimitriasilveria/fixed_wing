@@ -9,6 +9,27 @@
   "turbulence_sim_length": 300,
   "variables": [
     {
+      "name": "force_x",
+      "init_min": -100,
+      "init_max": 100,
+      "unit": "N",
+      "label": "$F_x$"
+    },
+    {
+      "name": "force_y",
+      "init_min": -100,
+      "init_max": 100,
+      "unit": "N",
+      "label": "$F_y$"
+    },
+    {
+      "name": "force_z",
+      "init_min": -100,
+      "init_max": 100,
+      "unit": "N",
+      "label": "$F_z$"
+    },
+    {
       "name": "roll",
       "convert_to_radians": true,
       "init_min": -30,

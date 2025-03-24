@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import os
 from icecream import ic
+import csv
 
 #Initiating constants##############################################
 class PID_fixed_wing():
@@ -222,43 +223,35 @@ class PID_fixed_wing():
             self.fixed_wing.state["velocity_v"].value = va_body[1]
             self.fixed_wing.state["velocity_w"].value = va_body[2]
             self.fixed_wing.state["attitude"].set_value(R.from_matrix(self.Car[:,:,i]).as_quat())
-            self.dC[:,:,i] = np.eye(3)
-            self.d_v = self.Cab[:,:,0].T@(self.va_r[:,i] - self.X[3:6,i]) 
-            self.d_r = self.Cab[:,:,0].T@(self.ra_r[:,i] - self.X[6:9,i]) 
-            self.d_Xi[0:9,0] = dX_to_dXi(self.dC[:,:,i],self.d_v,self.d_r) 
+            self.Cab[:,:,i] = R.from_quat(self.fixed_wing.state["attitude"].value).as_matrix()
+            self.dC[:,:,i] = self.Cab[:,:,i].T@self.Car[:,:,i]
+            self.d_v = self.Cab[:,:,i].T@(self.va_r[:,i] - self.X[3:6,i]) 
+            self.d_r = self.Cab[:,:,i].T@(self.ra_r[:,i] - self.X[6:9,i]) 
+            self.d_Xi[0:9,i] = dX_to_dXi(self.dC[:,:,i],self.d_v,self.d_r) 
 
         for i in range(1,self.N-1):
-
-            self.calc_A_and_B(i)
+            if i == 100:
+                ic()
             self.calc_K_pid(i)
             # ic(self.d_Xi[0:9,i])
             # input()
             self.dU[:,i] = -self.K_pid[:,:,i]@self.d_Xi[:,i]
-            self.dU[0:3,i] =np.clip(self.dU[0:3,i],-1,1)
-            self.f[:,i] = self.f_r[:,i] #- self.dU[0:3,i]
-            # self.f_r[:,i+1] = self.f[:,i]
-            self.wb_b_cont[:,i] = self.dC[:,:,i]@self.wr_r[:,i] #- self.dU[3:6,i]
+            # self.dU[2,i] *= -1
+            # self.dU[0:3,i] =np.clip(self.dU[0:3,i],-10,10)
+            # self.dU[3:6,i] =np.clip(self.dU[3:6,i],-np.pi/3,np.pi/3)
+            self.f[:,i] = self.f_r[:,i] - self.dU[0:3,i]
+            self.wb_b_cont[:,i] = self.dC[:,:,i]@self.wr_r[:,i] - self.dU[3:6,i]
             #self.wb_b_cont[:,i] = np.clip(self.wb_b_cont[:,i],-np.pi/3,np.pi/3)
-            attitude = R.from_matrix(self.Car[:,:,i]).as_quat()
-            # ic(self.fixed_wing.state["velocity_u"].value , self.fixed_wing.state["velocity_v"].value , self.fixed_wing.state["velocity_w"].value)
-            if i == 90:
-                ic()
-            controls = self.fixed_wing.calc_control(attitude, self.Car[:,:,i].T@self.va_r[:,i], self.wb_b_cont[:,i], self.f[:,i]) #should I use Cab or Car? 
+            attitude = R.from_matrix(self.Cab[:,:,i]).as_quat()
+
+            controls = self.fixed_wing.calc_control(attitude, self.Cab[:,:,i].T@self.X[3:6,i], self.wb_b_cont[:,i], self.f[:,i]) #should I use Cab or Car? 
             #printing all the states
 
-            # ic(self.fixed_wing.state["omega_p"].value,self.fixed_wing.state["omega_q"].value,self.fixed_wing.state["omega_r"].value)
-            # ic(self.fixed_wing.state["position_n"].value,self.fixed_wing.state["position_e"].value,self.fixed_wing.state["position_d"].value)
-            # ic(self.fixed_wing.state["velocity_u"].value,self.fixed_wing.state["velocity_v"].value,self.fixed_wing.state["velocity_w"].value)
-            # ic(self.fixed_wing.state["attitude"].value)
-            # input("initial states")
-
-
             _, _ = self.fixed_wing.step(controls)
-            #self.f_r[:,i+1] = self.fixed_wing.reference_forces(attitude, omega, vel, controls)
-            # self.fixed_wing.state["position_n"].value = self.ra_r[0,i+1]
-            # self.fixed_wing.state["position_e"].value = self.ra_r[1,i+1]
-            # self.fixed_wing.state["position_d"].value = self.ra_r[2,i+1]
+
             va_body = self.Car[:,:,i+1].T@self.va_r[:,i+1]
+            # Save va_body to a CSV file
+
             # self.fixed_wing.state["velocity_u"].value = va_body[0]
             # self.fixed_wing.state["velocity_v"].value = va_body[1]
             # self.fixed_wing.state["velocity_w"].value = va_body[2]
@@ -266,6 +259,10 @@ class PID_fixed_wing():
             # self.fixed_wing.state["omega_p"].value = self.wr_r[0,i+1]
             # self.fixed_wing.state["omega_q"].value = self.wr_r[1,i+1]
             # self.fixed_wing.state["omega_r"].value = self.wr_r[2,i+1]
+
+            
+            # Convert self.Car[:,:,i+1] to Euler angles
+
 
             #updating the states
             self.Cab[:,:,i+1] = R.from_quat(self.fixed_wing.state["attitude"].value).as_matrix()
@@ -279,15 +276,7 @@ class PID_fixed_wing():
             self.X[3,i+1] = va_inertial[0]
             self.X[4,i+1] = va_inertial[1]
             self.X[5,i+1] = va_inertial[2]
-            #printing the next desired values
-            # ic(self.wr_r[:,i+1])
-            # ic(self.ra_r[:,i+1])
-            # ic(self.Car[:,:,i+1]@self.va_r[:,i+1])
-            # ic(self.va_r[:,i+1])
-            # ic(R.from_matrix(self.Car[:,:,i+1].T).as_quat())
-            # input("next desired states")
-
-            
+            #printing the next desired values           
             
             self.dC[:,:,i+1] = self.Cab[:,:,i+1].T@self.Car[:,:,i+1]
             # self.dC[:,:,i+1] = self.Cab[:,:,i+1].T@self.Car[:,:,i+1]
@@ -312,7 +301,7 @@ class PID_fixed_wing():
         ax.set_xlabel('X Label')
         ax.set_ylabel('Y Label')
         ax.set_zlabel('Z Label')
-        ax.set_zlim(-1,0.1)
+        # ax.set_zlim(-1,0.1)
         # ax.set_ylim(0,20)
         # ax.set_xlim(190,200)
         ax.legend()
@@ -324,12 +313,20 @@ class PID_fixed_wing():
         ax.plot(self.t,self.abs_phi[0,:],label = "phi error")
         ax.plot(self.t,self.abs_r[0,:],label = "r error")
         ax.plot(self.t,self.abs_v[0,:],label = "v error")
-        ax.plot(self.t,self.abs_f[0,:],label = "f error")
         ax.plot(self.t,self.abs_w[0,:],label = "w error")
         ax.set_xlabel('time')
         ax.set_ylabel('error')
         ax.legend()
         # plt.show()
+    def plot_error_f(self):
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        ax.plot(self.t,self.abs_f[0,:],label = "f error")
+        ax.set_xlabel('time')
+        ax.set_ylabel('error')
+        ax.legend()
+        # plt.show()
+
     def plot_acceleration(self):
         fig = plt.figure()
         plt.subplot(2, 1, 1)
@@ -384,17 +381,56 @@ class PID_fixed_wing():
         plt.plot(self.t[1:],self.va_r[2,1:],label = "w_r")
         plt.legend()
         # plt.show()
+
+    def save_to_csv(self):
+        # Save va_body to a CSV file
+    # Convert all elements in pid.Car to Euler angles and save to a CSV file
+        euler_angles = []
+        for i in range(self.N):
+            euler = R.from_matrix(self.Car[:, :, i]).as_euler('xyz', degrees=True)
+            euler_angles.append(euler)
+
+        with open("desired_euler_angles.csv", "w", newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow(["Roll (deg)", "Pitch (deg)", "Yaw (deg)"])
+            writer.writerows(euler_angles)
+
+        # Multiply every element of self.Car by self.va_r and save to another CSV file
+        car_va_r_product = []
+        for i in range(self.N):
+            product = self.Car[:, :, i] @ self.va_r[:, i]
+            car_va_r_product.append(product)
+
+        with open("car_va_r_product.csv", "w", newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow(["X", "Y", "Z"])
+            writer.writerows(car_va_r_product)
+
+        # Save self.wr_r to another CSV file
+        with open("desired_wr_r.csv", "w", newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow(["Omega_p", "Omega_q", "Omega_r"])
+            writer.writerows(self.wr_r.T)
+
+        # Save all elements in self.ra_r to a CSV file
+        with open("desired_positions.csv", "w", newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow(["X", "Y", "Z"])
+            writer.writerows(self.ra_r.T)
 if __name__ == "__main__":
     pid = PID_fixed_wing()
     for i in range(pid.N):
         pid.references(i)
-    pid.plot_references()
-    pid.plot_acceleration()
-    plt.show()
+        pid.calc_A_and_B(i)
+    # pid.plot_references()
+    # pid.plot_acceleration()
+    # plt.show()
     pid.control()
+
+
     pid.plot_3D()
     pid.plot_erros()
-
+    pid.plot_error_f()
     pid.plot_controls()
     pid.plot_velocity()
     plt.show()
