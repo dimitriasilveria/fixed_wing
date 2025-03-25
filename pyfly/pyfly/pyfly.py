@@ -10,6 +10,7 @@ from icecream import ic
 import pandas as pd
 import os
 from scipy.spatial.transform import Rotation as R
+from scipy.linalg import expm
 
 
 class ConstraintException(Exception):
@@ -908,7 +909,7 @@ class PyFly:
 
         # # Throttle Fix 2: Increase motor gain
         # self.params["k_motor"] = 60
-        self.params["C_Y_delta_a"] = 0.19
+        self.params["C_Y_delta_a"] = 20
         self.params["S_prop"] = 0.4027
         # self.params["C_l_p"] = -0.1  # Further reduce roll damping
         # self.params["C_l_delta_a"] = 0.6  # Further improve aileron authority
@@ -1107,37 +1108,11 @@ class PyFly:
         y0.extend(self.get_states_vector(["omega_p", "omega_q", "omega_r", "position_n", "position_e", "position_d",
                           "velocity_u", "velocity_v", "velocity_w"]))
 
-        # # Convert self.state["attitude"] to euler angles and append to attitude.csv
-        # euler_angles = R.from_quat(self.state["attitude"].value).as_euler('xyz', degrees=True)
-        # attitude_data = {
-        #     'roll': euler_angles[0],
-        #     'pitch': euler_angles[1],
-        #     'yaw': euler_angles[2]
-        # }
-        # attitude_df = pd.DataFrame([attitude_data])
-        # attitude_file = 'attitude.csv'
-        # if os.path.exists(attitude_file):
-        #     attitude_df.to_csv(attitude_file, mode='a', header=False, index=False)
-        # else:
-        #     attitude_df.to_csv(attitude_file, mode='w', header=True, index=False)
-
-        # # Append self.state["position_n"], self.state["position_e"], and self.state["position_d"] to positions.csv
-        # position_data = {
-        #     'position_n': self.state["position_n"].value,
-        #     'position_e': self.state["position_e"].value,
-        #     'position_d': self.state["position_d"].value
-        # }
-        # position_df = pd.DataFrame([position_data])
-        # position_file = 'positions.csv'
-        # if os.path.exists(position_file):
-        #     position_df.to_csv(position_file, mode='a', header=False, index=False)
-        # else:
-        #     position_df.to_csv(position_file, mode='w', header=True, index=False)
         y0.extend(self.actuation.get_values())
         y0 = np.array(y0)
         try:
             # sol = scipy.integrate.solve_ivp(fun=lambda t, y: self._dynamics(t, y), t_span=(0, self.dt),
-                                            # y0=y0,t_eval=[self.dt])#,max_step=self.dt / 10)
+            #                                 y0=y0,t_eval=[self.dt])#,max_step=self.dt / 10)
             # self._set_states_from_ode_solution(sol.y[:, -1], save=True)
             y_next = self._runge_kutta4_step(y0, self.dt)
             self._set_states_from_ode_solution(y_next, save=True)
@@ -1229,14 +1204,13 @@ class PyFly:
         :return: (numpy array) next state vector
         """
 
-        def dynamics_wrapper(t, y):
-            return self._dynamics(t, y)
-
-        k1 = dynamics_wrapper(0, y)
-        k2 = dynamics_wrapper(dt / 2, y + (dt / 2) * k1)
-        k3 = dynamics_wrapper(dt / 2, y + (dt / 2) * k2)
-        k4 = dynamics_wrapper(dt, y + dt * k3)
-        return y + (dt / 6) * (k1 + 2 * k2 + 2 * k3 + k4)
+        k1 = self._dynamics(0, y)
+        k2 = self._dynamics(dt / 2, y + (dt / 2) * k1)
+        k3 = self._dynamics(dt / 2, y + (dt / 2) * k2)
+        k4 = self._dynamics(dt, y + dt * k3)
+        y_next = y + (dt / 6) * (k1 + 2 * k2 + 2 * k3 + k4)
+        y_next[0:4] = k1[0:4] 
+        return y_next
     def _dynamics(self, t, y, control_sp=None):
 
         """
@@ -1414,7 +1388,7 @@ class PyFly:
         aileron = (C_fy - self.params["C_Y_delta_r"]*rudder)/self.params["C_Y_delta_a"]
         f_drag_s = pre_fac * (C_D_alpha + C_D_beta + self.params["C_D_q"] * self.params["c"] / (2 * Va) * q + self.params["C_D_delta_e"] * elevator ** 2)
         f_prop = f_prop_drag + f_drag_s
-        
+        # ic(f_drag_s, f_prop_drag, f_prop)
         throttle = (1/self.params["k_motor"]) * np.sqrt(f_prop/(0.5 * self.rho * self.params["S_prop"] * self.params["C_prop"]) + Va**2)
         
         # df_new = pd.DataFrame([{'elevator:': elevator, 'aileron': aileron, 'rudder': rudder, 'throttle': throttle}])
@@ -1432,8 +1406,7 @@ class PyFly:
         if aileron > np.deg2rad(30) or aileron < np.deg2rad(-30):
             ic('Aileron out of bounds')
             ic(aileron)
-
-            
+           
         if elevator > np.deg2rad(35) or elevator < np.deg2rad(-30):
             ic('Elevator out of bounds')
             ic(elevator)
@@ -1457,18 +1430,15 @@ class PyFly:
         tau_prop = np.array([-self.params["k_T_P"] * (self.params["k_Omega"] * throttle) ** 2, 0, 0])
         tau_aero = np.array([l, m, 0.0])
         tau = tau_aero + tau_prop
-        # ic(elevator, aileron, rudder, throttle)
-        # input()
-        # df_new = pd.DataFrame([{'f_lift_s': f_lift_s}])
-        # file_path = 'desired_force.csv'
-        # if os.path.exists(file_path):
-        #     df_new.to_csv(file_path, mode='a', header=False, index=False)
-        # else:
-        #     df_new.to_csv(file_path, mode='w', header=True, index=False)
 
-        
+        # elevator = 0 
+        # aileron = 0
+        # rudder = 0.01
+        # throttle = 0
+        # tau = np.zeros(3)
 
-        return np.array([elevator, aileron, rudder, throttle, tau])
+        return np.array([elevator, aileron, rudder, throttle]), tau
+ 
 
     def reference_forces(self, attitude, omega, vel, controls):
         """
@@ -1556,7 +1526,7 @@ class PyFly:
 
         return f_prop + f_aero
 
-    def _f_attitude_dot(self, t, attitude, omega):
+    def _f_attitude_dot(self, dt, attitude, omega):
         """
         Right hand side of quaternion attitude differential equation.
 
@@ -1566,13 +1536,13 @@ class PyFly:
         :return: ([float]) right hand side of quaternion attitude differential equation.
         """
         p, q, r = omega
-        T = np.array([[0, -p, -q, -r],
-                      [p, 0, r, -q],
-                      [q, -r, 0, p],
-                      [r, q, -p, 0]
-                      ])
-        # return 0.5 * np.dot(T, attitude)
-        return self.state["attitude"].value
+        Rot = R.from_quat(attitude).as_matrix()
+        w_x = self.dt*np.array([[ 0 , -r,  q],
+            [r,   0, -p],
+            [-q,  p,   0]])
+        next_attitude = Rot@expm(w_x)
+        return R.from_matrix(next_attitude).as_quat()
+        # return self.state["attitude"].value
 
     def _f_omega_dot(self, t, omega, tau):
         """
@@ -1591,7 +1561,7 @@ class PyFly:
             self.gammas[7] * omega[0] * omega[1] - self.gammas[1] * omega[1] * omega[2] + self.gammas[4] * tau[0] +
             self.gammas[8] * tau[2]
         ])
-        return np.array([self.state["omega_p"].value, self.state["omega_q"].value, self.state["omega_r"].value])
+        return 0*debug #np.array([self.state["omega_p"].value, self.state["omega_q"].value, self.state["omega_r"].value])
 
     def _f_v_dot(self, t, v, omega, f):
         """
@@ -1603,6 +1573,7 @@ class PyFly:
         :param f: ([float]) forces acting on aircraft
         :return: ([float]) right hand side of linear velocity differntial equation.
         """
+
         v_dot = np.array([
             omega[2] * v[1] - omega[1] * v[2] + f[0] / self.params["mass"],
             omega[0] * v[2] - omega[2] * v[0] + f[1] / self.params["mass"],
@@ -1626,20 +1597,6 @@ class PyFly:
                       [2 * (e1 * e3 - e2 * e0), 2 * (e2 * e3 + e1 * e0), e3 ** 2 + e0 ** 2 - e1 ** 2 - e2 ** 2]
                       ])
         result = np.dot(T, v)
-        # df_new = pd.DataFrame([{'result_x': result[0], 'result_y': result[1], 'result_z': result[2]}])
-        # file_path = 'result.csv'
-        # if os.path.exists(file_path):
-        #     df_new.to_csv(file_path, mode='a', header=False, index=False)
-        # else:
-        #     df_new.to_csv(file_path, mode='w', header=True, index=False)
-
-        # euler_angles = R.from_quat(attitude).as_euler('xyz', degrees=True)
-        # df_attitude = pd.DataFrame([{'roll': euler_angles[0], 'pitch': euler_angles[1], 'yaw': euler_angles[2]}])
-        # file_path = 'attitude.csv'
-        # if os.path.exists(file_path):
-        #     df_attitude.to_csv(file_path, mode='a', header=False, index=False)
-        # else:
-        #     df_attitude.to_csv(file_path, mode='w', header=True, index=False)
         return result
        
 
@@ -1651,7 +1608,7 @@ class PyFly:
         :param setpoints: ([float]) setpoint for actuators
         :return: ([float]) right hand side of actuator differential equation.
         """
-        return self.actuation.rhs(setpoints)
+        return 0*self.actuation.rhs(setpoints)
 
     def _rot_b_v(self, attitude):
         """
@@ -1710,8 +1667,8 @@ class PyFly:
         wind_vec = np.dot(self._rot_b_v(attitude), self.wind.steady) + turbulence
         airspeed_vec = vel - wind_vec
         Va = np.linalg.norm(airspeed_vec)
-        alpha = 0*np.arctan2(airspeed_vec[2], airspeed_vec[0])
-        beta = 0*np.arcsin(airspeed_vec[1] / Va)
+        alpha = 0#*np.arctan2(airspeed_vec[2], airspeed_vec[0])
+        beta = 0#*np.arcsin(airspeed_vec[1] / Va)
 
         return Va, alpha, beta
 
@@ -1745,7 +1702,7 @@ class PyFly:
         self.state["velocity_w"].set_value(ode_sol[start_i + 8], save=save)
         self.actuation.set_states(ode_sol[start_i + 9:], save=save)
         #printing states
-        Rot = R.from_quat(self.state["attitude"].value).as_matrix()
+        # Rot = R.from_quat(self.state["attitude"].value).as_matrix()
         # ic(self.state["omega_p"].value,self.state["omega_q"].value,self.state["omega_r"].value)
         # ic(self.state["position_n"].value,self.state["position_e"].value,self.state["position_d"].value)
         # ic(self.state["velocity_u"].value,self.state["velocity_v"].value,self.state["velocity_w"].value)

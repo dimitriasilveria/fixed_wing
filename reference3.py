@@ -10,7 +10,7 @@ from mpl_toolkits.mplot3d import Axes3D
 from embedding_SO3_sim import Embedding
 import math
 #reference trajectory
-t_max = 30
+t_max = 46
 N = t_max*1  #number of points
 T = (t_max-0)/N 
 
@@ -21,11 +21,12 @@ dt = 0.1 # time step
 n_agents = 1
 w = 0.5
 k_phi = 15
-x = np.zeros((3,N,n_agents))
-x_dot = np.zeros((3,N,n_agents))
-x_dot_dot = np.zeros((3,N,n_agents))
+x = np.zeros((3,N))
+x_dot = np.zeros((3,N))
+x_dot_dot = np.zeros((3,N))
+angles = np.zeros((3,N))
 Car = np.zeros((3,3,N))
-Wr_r = np.zeros(3)
+wr_r = np.zeros((3,N))
 if n_agents >1:
     n_diff = int(math.factorial(n_agents) / (math.factorial(2) * math.factorial(n_agents-2)))
 else:
@@ -43,63 +44,22 @@ z_w = np.array([0,0,1])
 for i in range(N-1):
 
 
-        # Normalize velocity vector
-        v_norm = va_r[:,i]/np.linalg.norm(va_r[:,i])
-        v_xy_norm = np.linalg.norm(va_r[0:2,i])
-        # a_c = v_norm**2/r
-        #roll (phi)
-        phi = np.arctan2(-np.linalg.norm(va_r[:,i])**2,g*r)
-        #correcting the acceleration
-        # va_r_dot[:,i] = va_r_dot[:,i] - np.array([0,0,g - (g/np.cos(phi))]) 
-        #yaw (psi)
+    x_b = va_r[:,i]/np.linalg.norm(va_r[:,i])
+    z_b = (g*z_w - va_r_dot[:,i])/np.linalg.norm(g*z_w - va_r_dot[:,i])
+    y_b = np.cross(z_b,x_b)
+    Car[:,:,i+1] = np.hstack((x_b.reshape(3,1), y_b.reshape(3,1), z_b.reshape(3,1)))#@R.from_euler('xyz', [np.pi/100, 0, 0]).as_matrix()
+    phi, theta, psi = R.from_matrix(Car[:,:,i]).as_euler('xyz', degrees=False)
+    angles[:,i] = np.array([phi,theta,psi])
+    Omega_t = np.array([
+    [1, np.sin(phi)*np.tan(theta),          np.cos(phi)*np.tan(theta)],
+    [0, np.cos(phi),                        -np.sin(phi)],
+    [0, np.sin(phi)/np.cos(theta),           np.cos(phi)/np.cos(theta)]])
+    if np.linalg.det(Car[:,:,i]) != 0 and np.linalg.det(Car[:,:,i+1]) != 0:
 
-        psi = np.arctan2(v_norm[1],v_norm[0])
-        #pitch (theta)
-        theta = np.arctan2(va_r[2,i],v_xy_norm)
-        #ccentripetal acceleration component
-        # ac = np.cross(va_r[0:2,i],va_r_dot[0:2,i])/v_xy_norm
-
-
-        if i == 0:
-            ic(np.rad2deg(phi))
-
-
-            # Rotation matrices using Z-Y-X intrinsic rotations
-        Rz = np.array([
-            [np.cos(psi), np.sin(psi), 0],
-            [-np.sin(psi), np.cos(psi),  0],
-            [0,           0,            1]
-        ])
-
-        Ry = np.array([
-            [np.cos(theta), 0, -np.sin(theta)],
-            [0,             1, 0],
-            [np.sin(theta),0, np.cos(theta)]
-        ])
-
-        Rx = np.array([
-            [1, 0,          0],
-            [0, np.cos(phi), np.sin(phi)],
-            [0, -np.sin(phi),  np.cos(phi)]
-        ])
-
-        Rx_180 = np.array([
-            [1, 0,          0],
-            [0, np.cos(np.pi), -np.sin(np.pi)],
-            [0, np.sin(np.pi),  np.cos(np.pi)]])
-        # Rz_180 = np.array([
-        #     [np.cos(-np.pi), -np.sin(-np.pi), 0],
-        #     [np.sin(-np.pi), np.cos(-np.pi),  0],
-        #     [0,           0,            1]
-        # ])
-
-
-        Car[:,:,i] =  (Rx @ Ry @ Rz).T
-        if np.linalg.det(Car[:,:,i]) != 0 and np.linalg.det(Car[:,:,i+1]) != 0:
-
-            Wr_r[:] = so3_R3(logm(np.linalg.inv(Car[:,:,i])@Car[:,:,i+1]))/dt
-        else:
-            Wr_r[:] = np.zeros(3)
+        wr_r[:,i] = so3_R3(logm(Car[:,:,i].T@Car[:,:,i+1]))/dt
+    else:
+        wr_r[:,i] = np.zeros(3)
+    ic(np.linalg.norm(wr_r[:,i]))
         #yaw = R.from_matrix(Car[:,:,i,a]).as_euler('zyx')[0]
     # ic(X,yaw)
     # input()
@@ -149,6 +109,17 @@ ax.legend()
 # plt.ylabel("$\phi$ (degrees)")
 # plt.xlabel("Time (s)")
 # plt.legend()
+fig2 = plt.figure()
+plt.plot(t,wr_r[0,:],label="omega_x")
+plt.plot(t,wr_r[1,:],label="omega_y")
+plt.plot(t,wr_r[2,:],label="omega_z")
+plt.title("Angular rates")
+plt.xlabel("Time (s)")
+plt.ylabel("Angular rates (rad/s)")
+plt.legend()
 
-
+fig3 = plt.figure()
+plt.plot(t,angles[0,:],label="phi")
+plt.plot(t,angles[1,:],label="theta")
+plt.plot(t,angles[2,:],label="psi")
 plt.show()

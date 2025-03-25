@@ -37,11 +37,11 @@ class PID_fixed_wing():
         self.K_i = np.diag([3,3,3])*1 
         self.I3 = np.array([0, 0, 1])
         
-        self.r = 200
+        self.r = 250
         self.T_p = 46
         # self.r = 100
         # self.T_p = 25
-        self.t_max = 2#/5
+        self.t_max =1#/5
         self.t_min = 0
         
         self.T = self.fixed_wing.dt
@@ -55,6 +55,8 @@ class PID_fixed_wing():
         # self.va_r_dot = np.vstack([(2*np.pi/self.T_p)**2*(-self.r*np.cos(2*np.pi*self.t/self.T_p)), (2*np.pi/self.T_p)**2*(-self.r*np.sin(2*np.pi*self.t/self.T_p)), np.zeros_like(self.t)]) #reference linear acceleration 
         self.wr_r = np.zeros((3,self.N))  #reference angular velocity
         self.Car = np.zeros((3,3,self.N))  #reference attitude that converts from body fame to inertial
+        self.angels = np.zeros((3,self.N))
+        self.des_angles = np.zeros((3,self.N))
         #self.Car[:,:,0] = np.eye(3) #eul2rotm([pi*0.5 0 0])*Ca_r(:,:,1) #
         self.z_w = np.array([0,0,1])
         self.f_r= np.zeros((3,self.N))  #reference force
@@ -69,7 +71,7 @@ class PID_fixed_wing():
         self.va_r_dot = np.vstack(((2*np.pi/self.T_p)**2*(-self.r*np.cos(2*np.pi*self.t/self.T_p)), (2*np.pi/self.T_p)**2*(-self.r*np.sin(2*np.pi*self.t/self.T_p)), np.zeros_like(self.t))) #reference linear acceleration 
         self.c1 = 0.10
         self.va_r_dot_body = np.zeros((3,self.N))
-
+        self.va_r_body = np.zeros((3,self.N))
         p = np.linspace(-1, -9, 9)
         self.p_disc = np.exp(p*self.T)
         self.K_pid = np.zeros((6,9,self.N))
@@ -98,7 +100,19 @@ class PID_fixed_wing():
        
         # self.d_Xi[9:12,0] = self.c1*self.d_Xi[6:9,0] + self.d_Xi[3:6,0] 
 
-
+    def references2(self,i):
+        x_b = self.va_r[:,i]/np.linalg.norm(self.va_r[:,i])
+        z_b = (self.g*self.z_w - self.va_r_dot[:,i])/np.linalg.norm(self.g*self.z_w - self.va_r_dot[:,i])
+        y_b = np.cross(z_b,x_b)
+        self.Car[:,:,i] = np.hstack((x_b.reshape(3,1), y_b.reshape(3,1), z_b.reshape(3,1)))#@R.from_euler('xyz', [np.pi/100, 0, 0]).as_matrix()
+        phi, theta, psi = R.from_matrix(self.Car[:,:,i]).as_euler('xyz', degrees=False)
+        self.angels[:,i] = np.array([phi,theta,psi])
+        if i > 1 :
+            Omega_t = np.array([
+                [1, np.sin(phi)*np.tan(theta),          np.cos(phi)*np.tan(theta)],
+                [0, np.cos(phi),                        -np.sin(phi)],
+                [0, np.sin(phi)/np.cos(theta),           np.cos(phi)/np.cos(theta)]])
+            
 
 
     def references(self,i):
@@ -108,14 +122,14 @@ class PID_fixed_wing():
         v_xy_norm = np.linalg.norm(self.va_r[0:2,i])
         # a_c = v_norm**2/self.r
         #roll (phi)
-        phi = np.arctan2(-np.linalg.norm(self.va_r[:,i])**2,self.g*self.r)
+        phi = np.arctan2(np.linalg.norm(self.va_r[:,i])**2,self.g*self.r)
         #correcting the acceleration
         # self.va_r_dot[:,i] = self.va_r_dot[:,i] - np.array([0,0,self.g - (self.g/np.cos(phi))]) 
         #yaw (psi)
 
         psi = np.arctan2(v_norm[1],v_norm[0])
         #pitch (theta)
-        theta = np.arctan2(self.va_r[2,i],v_xy_norm)
+        theta = np.arctan2(self.va_r_dot[2,i],v_xy_norm)
         #ccentripetal acceleration component
         # ac = np.cross(self.va_r[0:2,i],self.va_r_dot[0:2,i])/v_xy_norm
 
@@ -127,48 +141,50 @@ class PID_fixed_wing():
 
             # Rotation matrices using Z-Y-X intrinsic rotations
         Rz = np.array([
-            [np.cos(psi), np.sin(psi), 0],
-            [-np.sin(psi), np.cos(psi),  0],
+            [np.cos(psi),-np.sin(psi), 0],
+            [np.sin(psi), np.cos(psi),  0],
             [0,           0,            1]
         ])
 
         Ry = np.array([
-            [np.cos(theta), 0, -np.sin(theta)],
+            [np.cos(theta), 0, np.sin(theta)],
             [0,             1, 0],
-            [np.sin(theta),0, np.cos(theta)]
+            [-np.sin(theta),0, np.cos(theta)]
         ])
 
         Rx = np.array([
             [1, 0,          0],
-            [0, np.cos(phi), np.sin(phi)],
-            [0, -np.sin(phi),  np.cos(phi)]
+            [0, np.cos(phi), -np.sin(phi)],
+            [0, np.sin(phi),  np.cos(phi)]
         ])
 
-        Rx_180 = np.array([
-            [1, 0,          0],
-            [0, np.cos(np.pi), -np.sin(np.pi)],
-            [0, np.sin(np.pi),  np.cos(np.pi)]])
 
-
-        self.Car[:,:,i] =  (Rx @ Ry @ Rz) #@Rx_180
-        
+        self.Car[:,:,i+1] =  (Rz @ Ry @ Rx) #@Rx_180
+        self.des_angles[:,i] = np.array([phi,theta,psi])
 
             
 
         # self.Car[:,:,i] = np.hstack((x_B.reshape(3,1), y_B.reshape(3,1), z_B.reshape(3,1)))#@R.from_euler('xyz', [np.pi/100, 0, 0]).as_matrix()
-        if i > 0 :
-            self.wr_r[:,i] = so3_R3(logm(self.Car[:,:,i-1].T@self.Car[:,:,i]))/self.T
+        if i > 1 :
+            Omega_t = np.array([
+                [1, np.sin(phi)*np.tan(theta),          np.cos(phi)*np.tan(theta)],
+                [0, np.cos(phi),                        -np.sin(phi)],
+                [0, np.sin(phi)/np.cos(theta),           np.cos(phi)/np.cos(theta)]])
+            self.wr_r[:,i] = so3_R3(logm(self.Car[:,:,i].T@self.Car[:,:,i+1]))/self.T
+            # ic(Omega_t.T@self.wr_r[:,i])
+            # self.wr_r[:,i] = self.Car[:,:,i].T@self.wr_r[:,i]
             v_body = self.Car[:,:,i].T@self.va_r[:,i]
             a_body  = self.Car[:,:,i].T@self.va_r_dot[:,i]
             self.va_r_dot_body[:,i] = a_body
-            wr_r_inertial = self.Car[:,:,i]@self.wr_r[:,i]
+            self.va_r_body[:,i] = v_body
+            # wr_r_inertial = self.Calr[:,:,i]@self.wr_r[:,i]
             # self.f_r[:,i] = self.mb*(self.va_r_dot[:,i] - self.g*self.z_w  + np.cross(wr_r_inertial,self.va_r[:,i]))
             self.f_r[:,i] = self.mb*(a_body - self.g*self.Car[:,:,i].T@self.z_w  + np.cross(self.wr_r[:,i],v_body)) 
             # self.f_r[:,i] = self.Car[:,:,i]@self.f_r[:,i]
             # self.f_r[2,i] = -self.mb*self.g/np.cos(phi)
             # self.f_r[:,i] = self.Car[:,:,i].T@(self.mb*self.va_r_dot[:,i] - self.mb*self.g*self.z_w) 
         else:
-            self.f_r[:,i] = self.Car[:,:,i].T@(self.mb*self.va_r_dot[:,i] - self.mb*self.g*self.z_w)  
+            self.f_r[:,i] = self.Car[:,:,i].T@(self.mb*self.va_r_dot[:,i] - self.mb*self.g*self.z_w) 
             # if np.linalg.det(self.Car[:,:,i]) != 0 and np.linalg.det(self.Car[:,:,i+1]) != 0:
                 
             # else:
@@ -206,9 +222,29 @@ class PID_fixed_wing():
     def calc_K_pid(self,i):
         self.K_pid[:,:,i] = ctrl.place(self.A[:,:,i],self.B[:,:,i],self.p_disc)#, method='YT')
 
+    def calc_omega_ref(self,i,tau):
+        dw_dt = np.array([
+            self.fixed_wing.gammas[1] * self.wr_r[0,i] * self.wr_r[1,i] - self.fixed_wing.gammas[2] * self.wr_r[1,i] * self.wr_r[2,i] + self.fixed_wing.gammas[3] * tau[0] +
+            self.fixed_wing.gammas[4] * tau[2],
+            self.fixed_wing.gammas[5] * self.wr_r[0,i] * self.wr_r[2,i] - self.fixed_wing.gammas[6] * (self.wr_r[0,i] ** 2 - self.wr_r[2,i] ** 2) + tau[1] / self.fixed_wing.I[
+                1, 1],
+            self.fixed_wing.gammas[7] * self.wr_r[0,i] * self.wr_r[1,i] - self.fixed_wing.gammas[1] * self.wr_r[1,i] * self.wr_r[2,i] + self.fixed_wing.gammas[4] * tau[0] +
+            self.fixed_wing.gammas[8] * tau[2]
+        ])
+        self.wr_r[:,i+1] = self.wr_r[:,i] + dw_dt*self.T
+        v_body = self.Car[:,:,i+1].T@self.va_r[:,i+1]
+        a_body  = self.Car[:,:,i+1].T@self.va_r_dot[:,i+1]
+        self.va_r_dot_body[:,i+1] = a_body
+        # wr_r_inertial = self.Car[:,:,i]+1@self.wr_r[:,i+1]
+        # self.f_r[:,i] = self.mb*(self.va_r_dot[:,i] - self.g*self.z_w  + np.cross(wr_r_inertial,self.va_r[:,i]))
+        self.f_r[:,i+1] = self.mb*(a_body  - self.g*self.Car[:,:,i+1].T@self.z_w  + np.cross(self.wr_r[:,i+1],v_body))
+        # phi = np.arctan2(-np.linalg.norm(self.va_r[:,i+1])**2,self.g*self.r)
+        # self.f_r[2,i+1] = -self.mb*self.g/np.cos(phi) 
+
     def control(self):
 
-        for i in range(2):
+        for i in range(4):
+
             self.X[3:6,i] = self.va_r[:,i] 
             self.X[6:9,i] = self.ra_r[:,i] 
             self.fixed_wing.state["omega_p"].value = self.wr_r[0,i]
@@ -228,10 +264,11 @@ class PID_fixed_wing():
             self.d_v = self.Cab[:,:,i].T@(self.va_r[:,i] - self.X[3:6,i]) 
             self.d_r = self.Cab[:,:,i].T@(self.ra_r[:,i] - self.X[6:9,i]) 
             self.d_Xi[0:9,i] = dX_to_dXi(self.dC[:,:,i],self.d_v,self.d_r) 
+            # self.f_r[:,i] = self.Car[:,:,i].T@(self.mb*self.va_r_dot[:,i] - self.mb*self.g*self.z_w)
 
-        for i in range(1,self.N-1):
-            if i == 100:
-                ic()
+        for i in range(3,self.N-1):
+
+            self.calc_A_and_B(i)
             self.calc_K_pid(i)
             # ic(self.d_Xi[0:9,i])
             # input()
@@ -239,23 +276,35 @@ class PID_fixed_wing():
             # self.dU[2,i] *= -1
             # self.dU[0:3,i] =np.clip(self.dU[0:3,i],-10,10)
             # self.dU[3:6,i] =np.clip(self.dU[3:6,i],-np.pi/3,np.pi/3)
-            self.f[:,i] = self.f_r[:,i] - self.dU[0:3,i]
-            self.wb_b_cont[:,i] = self.dC[:,:,i]@self.wr_r[:,i] - self.dU[3:6,i]
+            self.f[:,i] = self.f_r[:,i] #- self.dU[0:3,i]
+            self.wb_b_cont[:,i] = self.dC[:,:,i]@self.wr_r[:,i] #- self.dU[3:6,i]
             #self.wb_b_cont[:,i] = np.clip(self.wb_b_cont[:,i],-np.pi/3,np.pi/3)
-            attitude = R.from_matrix(self.Cab[:,:,i]).as_quat()
+            attitude = R.from_matrix(self.Car[:,:,i]).as_quat()
+            phi = np.arctan2(self.Car[2, 1, i], self.Car[2, 2, i])
+            theta = np.arcsin(-self.Car[2, 0, i])
+            psi = np.arctan2(self.Car[1, 0, i], self.Car[0, 0, i])
+            Omega_t = np.array([
+                [1, np.sin(phi)*np.tan(theta),          np.cos(phi)*np.tan(theta)],
+                [0, np.cos(phi),                        -np.sin(phi)],
+                [0, np.sin(phi)/np.cos(theta),           np.cos(phi)/np.cos(theta)]])
 
-            controls = self.fixed_wing.calc_control(attitude, self.Cab[:,:,i].T@self.X[3:6,i], self.wb_b_cont[:,i], self.f[:,i]) #should I use Cab or Car? 
+            controls, tau = self.fixed_wing.calc_control(attitude, self.Car[:,:,i].T@self.va_r[:,i], self.wb_b_cont[:,i], self.f[:,i]) #should I use Cab or Car? 
             #printing all the states
+            # self.calc_omega_ref(i,tau)
 
-            _, _ = self.fixed_wing.step(controls)
+            # ic(np.linalg.norm(self.wr_r[:,i]))
 
+            success, info = self.fixed_wing.step(controls)
+            if not success:
+                ic(info)
+                break
             va_body = self.Car[:,:,i+1].T@self.va_r[:,i+1]
             # Save va_body to a CSV file
 
-            # self.fixed_wing.state["velocity_u"].value = va_body[0]
-            # self.fixed_wing.state["velocity_v"].value = va_body[1]
-            # self.fixed_wing.state["velocity_w"].value = va_body[2]
-            # self.fixed_wing.state["attitude"].set_value(R.from_matrix(self.Car[:,:,i+1]).as_quat())
+            self.fixed_wing.state["velocity_u"].value = va_body[0]
+            self.fixed_wing.state["velocity_v"].value = va_body[1]
+            self.fixed_wing.state["velocity_w"].value = va_body[2]
+            self.fixed_wing.state["attitude"].set_value(R.from_matrix(self.Car[:,:,i+1]).as_quat())
             # self.fixed_wing.state["omega_p"].value = self.wr_r[0,i+1]
             # self.fixed_wing.state["omega_q"].value = self.wr_r[1,i+1]
             # self.fixed_wing.state["omega_r"].value = self.wr_r[2,i+1]
@@ -266,13 +315,16 @@ class PID_fixed_wing():
 
             #updating the states
             self.Cab[:,:,i+1] = R.from_quat(self.fixed_wing.state["attitude"].value).as_matrix()
+            phi, theta, psi = R.from_matrix(self.Cab[:,:,i]).as_euler('xyz', degrees=False)
+            self.angels[:,i] = np.array([self.fixed_wing.state["roll"].value,self.fixed_wing.state["pitch"].value,self.fixed_wing.state["yaw"].value]) #np.array([phi,theta,psi])  #
+
             self.X[0,i+1] = self.fixed_wing.state["omega_p"].value
             self.X[1,i+1] =self.fixed_wing.state["omega_q"].value
             self.X[2,i+1] =self.fixed_wing.state["omega_r"].value
             self.X[6,i+1] =self.fixed_wing.state["position_n"].value
             self.X[7,i+1] =self.fixed_wing.state["position_e"].value
             self.X[8,i+1] =self.fixed_wing.state["position_d"].value
-            va_inertial = self.Cab[:,:,i+1]@np.array([self.fixed_wing.state["velocity_u"].value,self.fixed_wing.state["velocity_v"].value,self.fixed_wing.state["velocity_w"].value])
+            va_inertial = np.array([self.fixed_wing.state["velocity_u"].value,self.fixed_wing.state["velocity_v"].value,self.fixed_wing.state["velocity_w"].value])
             self.X[3,i+1] = va_inertial[0]
             self.X[4,i+1] = va_inertial[1]
             self.X[5,i+1] = va_inertial[2]
@@ -302,7 +354,10 @@ class PID_fixed_wing():
         ax.set_ylabel('Y Label')
         ax.set_zlabel('Z Label')
         # ax.set_zlim(-1,0.1)
-        # ax.set_ylim(0,20)
+        # ax.set_ylim(0, 5)
+        # ax.set_xlim(190, 200)
+        # ax.set_zlim(-1, 0.1)
+        # ax.set_box_aspect([1, 1, 1])  # Equal aspect ratio for all axes
         # ax.set_xlim(190,200)
         ax.legend()
         # plt.show()
@@ -318,13 +373,12 @@ class PID_fixed_wing():
         ax.set_ylabel('error')
         ax.legend()
         # plt.show()
-    def plot_error_f(self):
+    def plot_force(self):
         fig = plt.figure()
-        ax = fig.add_subplot(111)
-        ax.plot(self.t,self.abs_f[0,:],label = "f error")
-        ax.set_xlabel('time')
-        ax.set_ylabel('error')
-        ax.legend()
+        plt.plot(self.t,self.f_r[0,:],label = "f x")
+        plt.plot(self.t,self.f_r[1,:],label = "f y")
+        plt.plot(self.t,self.f_r[2,:],label = "f z")
+        plt.legend()
         # plt.show()
 
     def plot_acceleration(self):
@@ -344,14 +398,14 @@ class PID_fixed_wing():
     def plot_controls(self):
         fig = plt.figure()
         plt.subplot(2, 1, 1)
-        plt.plot(self.t,self.f[0,:],label = "f_x")
-        plt.plot(self.t,self.f[1,:],label = "f_y")
-        plt.plot(self.t,self.f[2,:],label = "f_z")
+        plt.plot(self.t,self.X[0,:],label = "w_x")
+        plt.plot(self.t,self.X[1,:],label = "w_y")
+        plt.plot(self.t,self.X[2,:],label = "w_z")
         plt.legend()
         plt.subplot(2, 1, 2)
-        plt.plot(self.t,self.wb_b_cont[0,:],label = "omega_p")
-        plt.plot(self.t,self.wb_b_cont[1,:],label = "omega_q")
-        plt.plot(self.t,self.wb_b_cont[2,:],label = "omega_r")
+        plt.plot(self.t,self.wr_r[0,:],label = "omega_p")
+        plt.plot(self.t,self.wr_r[1,:],label = "omega_q")
+        plt.plot(self.t,self.wr_r[2,:],label = "omega_r")
         plt.legend()
         # plt.show()
 
@@ -376,18 +430,45 @@ class PID_fixed_wing():
         plt.plot(self.t[1:],self.X[5,1:],label = "w")
         plt.legend()
         plt.subplot(2, 1, 2)
-        plt.plot(self.t[1:],self.va_r[0,1:],label = "u_r")
-        plt.plot(self.t[1:],self.va_r[1,1:],label = "v_r")
-        plt.plot(self.t[1:],self.va_r[2,1:],label = "w_r")
+        plt.plot(self.t[1:],self.va_r_body[0,1:],label = "u_r")
+        plt.plot(self.t[1:],self.va_r_body[1,1:],label = "v_r")
+        plt.plot(self.t[1:],self.va_r_body[2,1:],label = "w_r")
         plt.legend()
+
         # plt.show()
+    def plot_angles(self):
+        fig = plt.figure()
+        plt.subplot(3, 1, 1)
+        plt.plot(self.t,np.rad2deg(self.angels[0,:]),label = "phi")
+        plt.plot(self.t,np.rad2deg(self.des_angles[0,:]),label = "phi_r")
+        plt.legend()
+        plt.subplot(3, 1, 2)
+        plt.plot(self.t,np.rad2deg(self.angels[1,:]),label = "theta")
+        plt.plot(self.t,np.rad2deg(self.des_angles[1,:]),label = "theta_r")
+        plt.legend()
+        plt.subplot(3, 1, 3)
+        plt.plot(self.t,np.rad2deg(self.angels[2,:]),label = "psi")
+        plt.plot(self.t,np.rad2deg(self.des_angles[2,:]),label = "psi_r")
+        plt.legend()
+
+    def plot_positions(self):
+        fig = plt.figure()
+        plt.subplot(3, 1, 1)
+        plt.plot(self.t,self.X[6,:],label = "x")
+        plt.legend()
+        plt.subplot(3, 1, 2)
+        plt.plot(self.t,self.X[7,:],label = "y")
+        plt.legend()
+        plt.subplot(3, 1, 3)
+        plt.plot(self.t,self.X[8,:],label = "z")
+        plt.legend()
 
     def save_to_csv(self):
         # Save va_body to a CSV file
     # Convert all elements in pid.Car to Euler angles and save to a CSV file
         euler_angles = []
         for i in range(self.N):
-            euler = R.from_matrix(self.Car[:, :, i]).as_euler('xyz', degrees=True)
+            euler = R.from_matrix(self.Car[:, :, i]).as_euler('zyx', degrees=True)
             euler_angles.append(euler)
 
         with open("desired_euler_angles.csv", "w", newline="") as file:
@@ -419,19 +500,23 @@ class PID_fixed_wing():
             writer.writerows(self.ra_r.T)
 if __name__ == "__main__":
     pid = PID_fixed_wing()
-    for i in range(pid.N):
+    for i in range(pid.N-1):
         pid.references(i)
-        pid.calc_A_and_B(i)
+        
+    pid.plot_force()
+    # plt.show()
     # pid.plot_references()
-    # pid.plot_acceleration()
+    pid.plot_acceleration()
     # plt.show()
     pid.control()
 
-
+    pid.plot_angles()
     pid.plot_3D()
     pid.plot_erros()
-    pid.plot_error_f()
+    # pid.plot_error_f()
     pid.plot_controls()
     pid.plot_velocity()
+    pid.plot_angles()
+    pid.plot_positions()
     plt.show()
     print("done")
