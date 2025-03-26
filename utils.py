@@ -28,9 +28,9 @@ def R3_so3(w):
 def so3_R3(log_R):
 
 
-    w1 = -log_R[2,1]
+    w1 = log_R[2,1]
     w2 = log_R[0,2]
-    w3 = -log_R[1,0]
+    w3 = log_R[1,0]
     w = np.array([w1,w2,w3]).T
     return w
 
