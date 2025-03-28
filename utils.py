@@ -43,6 +43,7 @@ def SE3_se3_back(SE3):
         lnR = np.zeros((3,3))
 
     w= np.array([[-lnR[1,2]], [lnR[0,2]], [-lnR[0,1]]])
+    # w= np.array([[lnR[1,2]], [lnR[0,2]], [lnR[0,1]]])
     wx=np.array([[0,     -w[2,0], w[2,0]],[w[2,0],   0,   -w[0,0]],[-w[1,0], w[0,0],   0]])
     if(theta==0):
         Vin=np.eye(3)

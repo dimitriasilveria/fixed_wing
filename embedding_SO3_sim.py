@@ -7,7 +7,7 @@ from scipy.linalg import expm, logm
 from icecream import ic
 #the rotation is clockwise #################################
 class Embedding():
-    def __init__(self,r,phi_dot,k_phi,tactic,n_agents,initial_pos,dt):
+    def __init__(self,r,phi_dot,k_phi,tactic,n_agents,dt):
         self.phi_dot = phi_dot
         self.r = r
         self.k_phi = k_phi
@@ -19,8 +19,8 @@ class Embedding():
         if (self.tactic == 'circle') or (self.tactic == 'spiral'):
             self.scale = 0 #scale the distortion around the x axis
         else:
-            self.scale = 0.5
-        self.hover_height = 0.8
+            self.scale = 0.0
+        self.hover_height = 2*r
         self.count = 0
         for i in range(self.n):
             self.Rot_des[:,:,i] = np.eye(3)
@@ -34,14 +34,11 @@ class Embedding():
         self.phi_cur = np.zeros(self.n)
         self.phi_dot_actual = np.zeros(self.n)
         self.z = np.zeros(self.n)
-
+        self.target_r = np.zeros((3, self.n))
+        self.target_v = np.zeros((3, self.n))
+        self.target_a = np.zeros((3, self.n))
        
-    def targets(self,agent_r,counter):
-        debug = False
-        target_r = np.zeros((3, self.n))
-        target_v = np.zeros((3, self.n))
-        
-        
+    def targets(self, agent_r, agent_v):
         unit = np.zeros((self.n, 3))
 
         unit = np.zeros((self.n, 3))
@@ -66,12 +63,8 @@ class Embedding():
             pos = np.array([agent_r[0, i] , agent_r[1, i] , agent_r[2, i]-self.z[i]])
 
             pos_rot = self.Rot_des[:,:,i].T@pos.T
-            phi, _, _ = self.cart2pol(pos)
-            # phi_dot_x = self.calc_wx(phi)#*(phi-self.phi_des[i])
-            # phi_dot_y = self.calc_wy(phi)
-            # v_d_hat_x = np.array([-phi_dot_x, -phi_dot_y, 0])
-            # Rot_x = expm(R3_so3(v_d_hat_x.reshape(-1,1))*self.dt)
-            # self.Rot_act[:,:,i] =Rot_x@self.Rot_act[:,:,i]# self.Rot_des[:,:,i].copy()#Rot_x@
+            phi, _ = self.cart2pol(pos)
+
 
             pos_x = pos_rot[0]
             pos_y = pos_rot[1]
@@ -114,24 +107,32 @@ class Embedding():
             v_d_hat_z = np.array([0, 0, wd])
             x = self.r * np.cos(phi_i)
             y = self.r * np.sin(phi_i)
-            Rot_z = expm(R3_so3(v_d_hat_z.reshape(-1,1))*self.dt)
+            Rot_z = expm(R3_so3(v_d_hat_z)*self.dt)
             pos_d_hat = np.array([x, y, 0])
             pos_d_hat = Rot_z@pos_d_hat
-            phi_d, _, phi_d_raw= self.cart2pol(pos_d_hat)
+            phi_d, _, = self.cart2pol(pos_d_hat)
 
-            phi_dot_x = self.calc_wx(phi_d_raw)#*(phi_d-self.phi_des[i])
-            phi_dot_y = self.calc_wy(phi_d_raw) #phi_i-phi_prev[i]*
+            phi_dot_x = self.calc_wx(phi_d)#*(phi_d-self.phi_des[i])
+            phi_dot_y = self.calc_wy(phi_d) #phi_i-phi_prev[i]*
             v_d_hat_x_y = np.array([phi_dot_x, phi_dot_y, 0])
-            self.Rot_des[:,:,i] = expm(R3_so3(v_d_hat_x_y.reshape(-1,1)))
+            self.Rot_des[:,:,i] = expm(R3_so3(v_d_hat_x_y))
      
 
             pos_d = self.Rot_des[:,:,i]@pos_d_hat
             # if i == 1 and not self.pass_ref[i]:
+            pos_d += np.array([0,0,self.z[i]])
 
-            #pos_d = (self.Rot_des[:,:,0].T@pos_d)
-            target_r[0, i] = pos_d[0] #+ self.phi_dot*np.cos(phi_i)*np.sin(phi_i)
-            target_r[1, i] = pos_d[1] #+ self.r*np.cos(phi_i)**2
-            target_r[2, i] = pos_d[2] + self.z[i]
+            vel_d = (pos_d - np.array([x, y, self.z[i]]))/self.dt
+
+            # accel_d = (vel_d - agent_v[:,i])/self.dt
+            # vel_d = (pos_d - self.target_r[:,i])/self.dt
+
+            accel_d = (vel_d - self.target_v[:,i])/self.dt
+
+            self.target_r[:,i] = pos_d
+            self.target_v[:,i] = vel_d
+            self.target_a[:,i] = accel_d
+
             # if self.tactic == 'circle':
             #     target_r[2,i] = 0.5
             unit[i, :] = [np.cos(phi_i), np.sin(phi_i), 0]
@@ -141,24 +142,24 @@ class Embedding():
         #     warnings.simplefilter("always")  # Ensure all warnings are captured
         k = 0
         if self.n == 2:
-            distances[0] = np.linalg.norm(target_r[:, 0] - target_r[:, 1])
+            distances[0] = np.linalg.norm(self.target_r[:, 0] - self.target_r[:, 1])
             phi_diff[0] = np.abs(self.phi_cur[0] - self.phi_cur[1])
         for i in range(self.n):
             for j in range(i+1, self.n):
-                distances[k] = np.linalg.norm(target_r[:, i] - target_r[:, j])
+                distances[k] = np.linalg.norm(self.target_r[:, i] - self.target_r[:, j])
                 phi_diff[k] = np.arccos(np.dot(unit[i,:],unit[j,:]))
                 k += 1
         
         
-        return  self.phi_cur,target_r, target_v, phi_diff, distances, debug
+        return  self.phi_cur,self.target_r, self.target_v, self.target_a, phi_diff, distances
     
 
     def calc_wx(self,phi):
-        return self.scale*(np.sin(phi)*np.cos(phi)-np.sin(phi)**3)
-        #return self.scale*np.cos(phi)*np.sin(phi)
+        # return self.scale*(np.sin(phi)*np.cos(phi)-np.sin(phi)**3)
+        return self.scale*np.cos(phi)*np.sin(phi)
     
     def calc_wy(self,phi):
-        return self.scale*np.sin(-phi)*np.cos(phi)**2
+        return 0*self.scale*np.sin(phi)*np.cos(phi)**2
 
     def phi_dot_desired(self,phi_i, phi_j, phi_k, phi_dot_des, k,i):
 
@@ -188,7 +189,7 @@ class Embedding():
         phi_raw = np.arctan2(pos_y, pos_x)
         phi = np.mod(phi_raw, 2*np.pi)
         r = np.linalg.norm([pos_x, pos_y])
-        return phi, r, phi_raw
+        return phi, r
 
 
     # Quaternion multiplication function (can be skipped if using numpy.quaternion)

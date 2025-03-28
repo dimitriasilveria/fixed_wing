@@ -19,7 +19,7 @@ import csv
 class PID_fixed_wing():
     def __init__(self):
         #fixed wing model
-        self.fixed_wing = FixedWing()
+        self.fixed_wing = FixedWing("/home/dimitria/fixed_wing/pyfly/pyfly/pyfly_config.json", "/home/dimitria/fixed_wing/pyfly/pyfly/x8_param.mat")
 
         self.qsi = np.zeros((9,1)) 
         self.n_agents = 1
@@ -34,7 +34,7 @@ class PID_fixed_wing():
         self.T_p = 40
         # self.r = 100
         # self.T_p = 25
-        self.t_max =20#/5
+        self.t_max =3#/5
         self.t_min = 0
         
         self.T = self.fixed_wing.dt
@@ -42,7 +42,8 @@ class PID_fixed_wing():
         ic(self.N)
         #reference trajectories###################################################
 
-        
+        self.n = 12
+        self.m = 6
         self.wr_r = np.zeros((3,self.N))  #reference angular velocity
         self.d_wr_r = np.zeros((3,self.N))  #reference angular acceleration
         self.Car = np.zeros((3,3,self.N))  #reference attitude that converts from body fame to inertial
@@ -54,19 +55,20 @@ class PID_fixed_wing():
         self.tau_r = np.zeros((3,self.N))  #reference torque
         # self.f_A_r = np.zeros((3,self.N))  #reference aerodynamics force
         #controller and state-space matrices ###################################
-        self.A = np.zeros((9,9,self.N))
-        self.B = np.zeros((9,6,self.N)) #check this
+        self.A = np.zeros((self.n,self.n,self.N))
+        self.B = np.zeros((self.n,self.m,self.N)) #check this
 
         self.t = np.linspace(self.t_min,self.t_max,self.N) #time
         self.ra_r = np.vstack((self.r*np.cos(2*np.pi*self.t/self.T_p), self.r*np.sin(2*np.pi*self.t/self.T_p), -1*np.ones_like(self.t)))  #reference position
         self.va_r = np.vstack(((2*np.pi/self.T_p)*(-self.r*np.sin(2*np.pi*self.t/self.T_p)), (2*np.pi/self.T_p)*self.r*np.cos(2*np.pi*self.t/self.T_p), 0.6*np.zeros_like(self.t))) #reference linear velocity
         self.va_r_dot = np.vstack(((2*np.pi/self.T_p)**2*(-self.r*np.cos(2*np.pi*self.t/self.T_p)), (2*np.pi/self.T_p)**2*(-self.r*np.sin(2*np.pi*self.t/self.T_p)), np.zeros_like(self.t))) #reference linear acceleration 
-        self.c1 = 0.10
+        self.c1 = 2
         self.va_r_dot_body = np.zeros((3,self.N))
         self.va_r_body = np.zeros((3,self.N))
-        p = np.linspace(-1, -9, 9)
+        # p = np.linspace(-1, -9, self.n)
+        p = np.array([-5,-2.5, -10.1,-2.3,-0.5,-1.5,-2.2,-3.1,-2,-6.5,-3.4,-8])
         self.p_disc = np.exp(p*self.T)
-        self.K_pid = np.zeros((6,9,self.N))
+        self.K_pid = np.zeros((self.m,self.n,self.N))
         #actual trajectory and errors ###########################################
         self.Cab = np.zeros((3,3,self.N))
         self.Cab[:,:,0] = np.eye(3) #eul2rotm([pi*0.5 0 0])*Ca_r(:,:,1) #
@@ -75,8 +77,8 @@ class PID_fixed_wing():
         # self.f_A = np.zeros((3,self.N))  #actual aerodynamics force
         self.wb_b_cont = np.zeros((3,self.N)) #angular velocity input
         self.dwb_b_cont = np.zeros((3,self.N)) #angular acceleration input
-        self.d_Xi = np.zeros((9,self.N))  #error
-        self.dU = np.zeros((6,self.N))
+        self.d_Xi = np.zeros((self.n,self.N))  #error
+        self.dU = np.zeros((self.m,self.N))
         self.dC = np.zeros((3,3,self.N))
         # self.d_v = np.zeros(3)
         # self.d_r = np.zeros(3)
@@ -111,7 +113,7 @@ class PID_fixed_wing():
 
     def references(self,i):
         
-            #attitude = R.from_matrix(Car[:,:,i]).as_quat()
+        #attitude = R.from_matrix(Car[:,:,i]).as_quat()
         v_norm = self.va_r[:,i]/np.linalg.norm(self.va_r[:,i])
         v_xy_norm = np.linalg.norm(self.va_r[0:2,i])
 
@@ -186,15 +188,18 @@ class PID_fixed_wing():
         self.A[3:6,3:6,i]   = -R3_so3(self.wr_r[:,i])  
         self.A[6:9,3:6,i]   = np.eye(3) 
         self.A[6:9,6:9,i]   = -R3_so3(self.wr_r[:,i]) 
-        # self.A[9:12,3:6,i]  = np.eye(3) 
-        # self.A[9:12,6:9,i]  = self.c1*np.eye(3) 
+
         # self.B[5,0,i] = 1/self.mb 
         self.B[3:6, 0:3,i] = np.eye(3)/self.mb
         self.B[0:3, 3:6,i]  = np.eye(3)  
         self.B[3:6, 3:6,i]  = R3_so3(self.Car[:,:,i].T@self.va_r[:,i])/self.mb
+        if self.n == 12:
+            self.A[9:12,3:6,i]  = np.eye(3) 
+            self.A[9:12,6:9,i]  = self.c1*np.eye(3) 
         #self.B[7, 0, i] = 1
-        self.A[:,:,i] = np.eye(9) + self.T * self.A[:,:,i] 
+        self.A[:,:,i] = np.eye(self.n) + self.T * self.A[:,:,i] 
         self.B[:,:,i] = self.T*self.B[:,:,i]#+ 1e-5 * np.random.randn(*self.B[:,:,i].shape)
+
 
 
 
@@ -220,6 +225,8 @@ class PID_fixed_wing():
             self.d_v = self.Cab[:,:,i].T@(self.va_r[:,i] - self.X[3:6,i]) 
             self.d_r = self.Cab[:,:,i].T@(self.ra_r[:,i] - self.X[6:9,i]) 
             self.d_Xi[0:9,i] = dX_to_dXi(self.dC[:,:,i],self.d_v,self.d_r) 
+            if self.n == 12: 
+                self.d_Xi[9:12,i] = self.c1*self.d_Xi[6:9,i] + self.d_Xi[3:6,i] 
             self.wb_b_cont[:,i] = self.dC[:,:,i]@self.wr_r[:,i]
             # self.f_r[:,i] = self.Car[:,:,i].T@(self.mb*self.va_r_dot[:,i] - self.mb*self.g*self.z_w)
 
@@ -273,8 +280,9 @@ class PID_fixed_wing():
             # self.dC[:,:,i+1] = self.Cab[:,:,i+1].T@self.Car[:,:,i+1]
             self.d_v = self.Cab[:,:,i+1].T@(self.va_r[:,i+1] - self.X[3:6,i+1]) 
             self.d_r = self.Cab[:,:,i+1].T@(self.ra_r[:,i+1] - self.X[6:9,i+1]) 
-            self.d_Xi[0:9,i+1] = dX_to_dXi(self.dC[:,:,i+1],self.d_v,self.d_r) 
-            # self.d_Xi[9:12,i+1] = self.c1@self.d_Xi[6:9,i+1] + self.d_Xi[3:6,i+1] 
+            self.d_Xi[0:9,i+1] = dX_to_dXi(self.dC[:,:,i+1],self.d_v,self.d_r)
+            if self.n == 12: 
+                self.d_Xi[9:12,i+1] = self.c1*self.d_Xi[6:9,i+1] + self.d_Xi[3:6,i+1] 
 
             self.abs_phi[0,i+1] =np.linalg.norm(self.d_Xi[0:3,i+1]) 
             self.abs_r[0,i+1] =  np.linalg.norm(self.d_Xi[6:9,i+1]) 
@@ -446,10 +454,10 @@ if __name__ == "__main__":
     for i in range(pid.N-1):
         pid.references(i)
         
-    pid.plot_force()
+    # pid.plot_force()
     # plt.show()
     # pid.plot_references()
-    pid.plot_acceleration()
+    # pid.plot_acceleration()
     # plt.show()
     pid.control()
 
