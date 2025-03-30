@@ -19,7 +19,7 @@ class Embedding():
         if (self.tactic == 'circle') or (self.tactic == 'spiral'):
             self.scale = 0 #scale the distortion around the x axis
         else:
-            self.scale = 0.0
+            self.scale = 0.01
         self.hover_height = 2*r
         self.count = 0
         for i in range(self.n):
@@ -122,10 +122,10 @@ class Embedding():
             # if i == 1 and not self.pass_ref[i]:
             pos_d += np.array([0,0,self.z[i]])
 
-            vel_d = (pos_d - np.array([x, y, self.z[i]]))/self.dt
+            # vel_d = (pos_d - np.array([x, y, self.z[i]]))/self.dt
 
             # accel_d = (vel_d - agent_v[:,i])/self.dt
-            # vel_d = (pos_d - self.target_r[:,i])/self.dt
+            vel_d = (pos_d - self.target_r[:,i])/self.dt
 
             accel_d = (vel_d - self.target_v[:,i])/self.dt
 

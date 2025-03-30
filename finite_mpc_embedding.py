@@ -14,13 +14,15 @@ from mpl_toolkits.mplot3d import Axes3D
 import os
 from icecream import ic
 import csv
+from scipy.sparse import csc_matrix
+from scipy.optimize import minimize
 
 #Initiating constants##############################################
-class PID_fixed_wing():
+class MPC_fixed_wing():
     def __init__(self,t_max, t_min, r, T_p):
         #fixed wing model
         self.fixed_wing = FixedWing("/home/dimitria/fixed_wing/pyfly/pyfly/pyfly_config.json", "/home/dimitria/fixed_wing/pyfly/pyfly/x8_param.mat")
-        self.n = 9
+        self.n = 12
         self.m = 6
         self.qsi = np.zeros((self.n,1)) 
         self.n_agents = 1
@@ -65,13 +67,18 @@ class PID_fixed_wing():
         self.va_r_body = np.zeros((3,self.N))
         # p = np.array([-5,-2.5, -1.1,-2.3,-0.5,-1.5,-2.2,-3.1,-2])
         # p = np.array([-5,-2.5, -10.1,-2.3,-0.5,-1.5,-2.2,-3.1,-2,-6.5,-3.4,-8])
-        if self.n == 9:
-            p = p = np.array([-5,-3.5, -2.1,-2.3,-3.5,-4.5,-1.5,-2.2,-3.1])
-        else:
-            p = np.array([-5,-3.5, -2.1,-2.3,-3.5,-4.5,-2.2,-3.1,-2,-1.5,-4,-1])
-        self.p_disc = np.exp(p*self.T)
-        self.K_pid = np.zeros((self.m,self.n,self.N))
+        self.Nh = 10
+        self.Q_v = 1e6*np.eye(3);
+        self.Q_r = np.diag([1e9,1e9,1e13]);
+        self.Q_phi =1e5*np.eye(3);
+        self.Q_aug = 1e5*np.eye(3);
+        self.Q_i = np.eye(self.A.shape[1])
+        self.Q_i[0:12,0:12] = block_diag(self.Q_phi, self.Q_v, self.Q_r, self.Q_aug)
+        # Q_f = 1/(1)
+        # Q_w = 1/(0.5)
         self.c1 = 0.2
+
+
         #actual trajectory and errors ###########################################
         self.Cab = np.zeros((3,3,self.N))
         self.Cab[:,:,0] = np.eye(3) #eul2rotm([pi*0.5 0 0])*Ca_r(:,:,1) #
@@ -101,24 +108,7 @@ class PID_fixed_wing():
         self.tau_max = None
         # self.d_Xi[9:12,0] = self.c1*self.d_Xi[6:9,0] + self.d_Xi[3:6,0] 
 
-    def references2(self,i, ra_r, va_r, va_r_dot):
-        self.ra_r[:,i] = ra_r
-        self.va_r[:,i] = va_r
-        self.va_r_dot[:,i] = va_r_dot
-        x_b = self.va_r[:,i]/np.linalg.norm(self.va_r[:,i])
-        z_b = (self.g*self.z_w - self.va_r_dot[:,i])/np.linalg.norm(self.g*self.z_w - self.va_r_dot[:,i])
-        y_b = np.cross(z_b,x_b)
-        self.Car[:,:,i] = np.hstack((x_b.reshape(3,1), y_b.reshape(3,1), z_b.reshape(3,1)))#@R.from_euler('xyz', [np.pi/100, 0, 0]).as_matrix()
-        phi, theta, psi = R.from_matrix(self.Car[:,:,i]).as_euler('xyz', degrees=False)
-        self.angels[:,i] = np.array([phi,theta,psi])
-        if i > 1 :
-            Omega_t = np.array([
-                [1, np.sin(phi)*np.tan(theta),          np.cos(phi)*np.tan(theta)],
-                [0, np.cos(phi),                        -np.sin(phi)],
-                [0, np.sin(phi)/np.cos(theta),           np.cos(phi)/np.cos(theta)]])
             
-
-
     def references(self,i, ra_r, va_r, va_r_dot):
         self.ra_r[:,i] = ra_r
         self.va_r[:,i] = va_r
@@ -167,7 +157,8 @@ class PID_fixed_wing():
         self.Car[:,:,i+1] =  (Rz @ Ry @ Rx) #@Rx_180
         self.des_angles[:,i] = np.array([phi,theta,psi])
 
-            
+        if i == 0:
+            self.Car[:,:,i] = self.Car[:,:,i+1]@R.from_euler('xyz', [0, 0, 0.01]).as_matrix()
 
         # self.Car[:,:,i] = np.hstack((x_B.reshape(3,1), y_B.reshape(3,1), z_B.reshape(3,1)))#@R.from_euler('xyz', [np.pi/100, 0, 0]).as_matrix()
         if i > 1 :
@@ -213,10 +204,54 @@ class PID_fixed_wing():
         self.B[:,:,i] = self.T*self.B[:,:,i]#+ 1e-5 * np.random.randn(*self.B[:,:,i].shape)
 
 
+    def get_MPC_matrices(self,i):
 
+        Q_hat = np.zeros(self.n*self.Nh)
+        R_hat = np.zeros(self.m*self.Nh)
+        Aqp = np.zeros(self.n*self.Nh,self.n)
+        Bqp = np.zeros(self.n*self.Nh,self.m*self.Nh)
 
-    def calc_K_pid(self,i):
-        self.K_pid[:,:,i] = ctrl.place(self.A[:,:,i],self.B[:,:,i],self.p_disc)#, method='YT')
+        for i in range(0,self.Nh-1):
+            Aqp[i*self.n:(i+1)*self.n,:] = np.linalg.matrix_power(self.A[:,:,i],(i+1))
+            Q_hat[self.n*i:self.n*i+self.n,self.n*i:self.n*i+self.n] =  np.block_diag(self.Q_phi, self.Q_v, self.Q_r, self.Q_aug)
+            R_hat[self.m*i:self.m*i+self.m,self.m*i:self.m*i+self.m] = 10*np.diag([1e3,1e3,1e3,1e1,1e1,1e1])
+
+        for i in range(0,self.Nh-1):
+            a = np.vstack([np.zeros(((i+1)*self.n,self.n)), np.eye(self.n), Aqp[:-(i+1)*self.n,:]])
+            Bqp[:,self.m*i:self.m*i+self.m] = a[self.n:,:]@self.B[:,:,i]
+
+        Q_hat[-self.n:,-self.n:] = self.Q_i
+        return Q_hat, R_hat, Aqp, Bqp
+    
+    def mpc_outputs(self,i):
+        Q_hat, R_hat, Aqp, Bqp = self.get_MPC_matrices(i)
+        H =  Bqp.T @ Q_hat @ Bqp + R_hat
+        H = (H + H.T) / 2  # Ensure symmetry
+
+        # Convert to sparse matrices
+        Aqp_sparse = csc_matrix(Aqp)
+        H_sparse = csc_matrix(H)
+        # Compute G
+        G = 2 * Bqp.T @ Q_hat @ Aqp @ self.d_Xi[:,i]
+        # Define the quadratic objective function: 0.5 * U^T H U + G^T U
+        constraints = ()
+        # Define the quadratic objective function: 0.5 * U^T H U + G^T U
+        def objective(U):
+            return 0.5 * U.T @ H @ U + G.T @ U
+        U0 = np.zeros(H.shape[0])
+
+        res = minimize(objective, U0, method='trust-constr', constraints=constraints,
+               options={'gtol': 1e-4, 'xtol': 1e-4, 'maxiter': 200, 'disp': False})
+        
+        # Extract solution
+        U_h = res.x
+
+        # Extract first 4 elements for dU
+        dU = U_h[:self.m]
+
+        return dU
+    
+
 
     def set_initial_conditions(self, i):
 
@@ -230,6 +265,7 @@ class PID_fixed_wing():
         self.fixed_wing.x[3:6] = va_body
         self.fixed_wing.R = self.Car[:,:,i]
         self.Cab[:,:,i] = self.fixed_wing.R
+        self.dC[:,:,i] = self.Cab[:,:,i].T@self.Car[:,:,i]
         self.d_v = self.Cab[:,:,i].T@(self.va_r[:,i] - self.X[3:6,i]) 
         self.d_r = self.Cab[:,:,i].T@(self.ra_r[:,i] - self.X[6:9,i]) 
         self.d_Xi[0:9,i] = dX_to_dXi(self.dC[:,:,i],self.d_v,self.d_r)
@@ -240,8 +276,8 @@ class PID_fixed_wing():
     def control(self, i, ra_r, va_r, va_r_dot):
 
         # self.references(i,ra_r, va_r, va_r_dot)
-        self.calc_A_and_B(i)
-        self.calc_K_pid(i)
+        
+        # self.calc_K_pid(i)
         #calculating the errors
         
         self.dC[:,:,i] = self.Cab[:,:,i].T@self.Car[:,:,i]
@@ -258,7 +294,7 @@ class PID_fixed_wing():
         self.abs_f[0,i] = np.linalg.norm(self.dU[0:3,i]) 
         self.abs_w[0,i] =np.linalg.norm(self.dU[3:6,i]) 
 
-        self.dU[:,i] = -self.K_pid[:,:,i]@self.d_Xi[:,i]
+        self.dU[:,i] = -self.K_lqr[:,:,i]@self.d_Xi[:,i]
 
         #state constraints
         # self.f_min, self.tau_min = self.fixed_wing._forces_min(self.Car[:,:,i])
