@@ -108,8 +108,8 @@
     },
     {
       "name": "velocity_u",
-      "init_min": 13,
-      "init_max": 22,
+      "init_min": 5,
+      "init_max": 200,
       "unit": "m/s",
       "label": "u"
     },
