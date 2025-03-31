@@ -1,6 +1,7 @@
 import numpy as np
 # from finite_pid_embedding import PID_fixed_wing
-from finite_lqr_embedding import LQR_fixed_wing
+# from finite_lqr_embedding import LQR_fixed_wing
+from finite_mpc_embedding import MPC_fixed_wing
 from embedding_SO3_sim import Embedding
 import matplotlib.pyplot as plt
 from icecream import ic
@@ -16,7 +17,8 @@ t_min = 0
 k_phi = 15
 tactic = ''
 n_agents = 1
-controller = LQR_fixed_wing(t_max, t_min, r, T_p)
+controller = MPC_fixed_wing(t_max, t_min, r, T_p)
+Nh = controller.Nh
 dt = controller.T
 embedding = Embedding(r,phi_dot,k_phi,tactic,n_agents,dt)
 
@@ -55,15 +57,15 @@ for i in range(1,N-1):
     controller.references(i,target_r[:,0], target_v[:,0], target_a[:,0])
     controller.calc_A_and_B(i)
 
-for i in range(N,1,-1):
-    controller.calc_K_lqr(i)
+# for i in range(N,1,-1):
+#     controller.calc_K_lqr(i)
 
 
 pos_real = target_r
 vel_real = target_v
 # controller.plot_references()
 plt.show()
-for i in range(1,N-1):
+for i in range(1,N-Nh):
     # _,target_r, target_v, target_a, _, _ = embedding.targets(pos_real,vel_real)
     np.clip(target_a, -10, 10)
     np.clip(target_v, -40, 40)
@@ -77,10 +79,11 @@ controller.plot_erros()
 # controller.plot_controls()
 # controller.plot_velocity_body()
 # controller.plot_angles()
-# controller.plot_velocity()
-# controller.plot_positions()
-controller.plot_error_position()
-controller.plot_error_velocity()
+controller.plot_force_omega()
+controller.plot_velocity()
+controller.plot_positions()
+# controller.plot_error_position()
+# controller.plot_error_velocity()
 plt.show()
 
 

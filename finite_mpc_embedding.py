@@ -16,6 +16,7 @@ from icecream import ic
 import csv
 from scipy.sparse import csc_matrix
 from scipy.optimize import minimize
+from scipy.linalg import block_diag
 
 #Initiating constants##############################################
 class MPC_fixed_wing():
@@ -42,6 +43,8 @@ class MPC_fixed_wing():
         
         self.T = self.fixed_wing.dt
         self.N = int((self.t_max-self.t_min)/self.T) #number of points
+        self.Nh = 3
+
         ic(self.N)
         #reference trajectories###################################################
 
@@ -67,13 +70,18 @@ class MPC_fixed_wing():
         self.va_r_body = np.zeros((3,self.N))
         # p = np.array([-5,-2.5, -1.1,-2.3,-0.5,-1.5,-2.2,-3.1,-2])
         # p = np.array([-5,-2.5, -10.1,-2.3,-0.5,-1.5,-2.2,-3.1,-2,-6.5,-3.4,-8])
-        self.Nh = 10
-        self.Q_v = 1e6*np.eye(3);
-        self.Q_r = np.diag([1e9,1e9,1e13]);
-        self.Q_phi =1e5*np.eye(3);
-        self.Q_aug = 1e5*np.eye(3);
+        self.Nh = 5
+        self.Q_v = 1e4*np.eye(3)
+        self.Q_r = 1e8*np.eye(3)
+        self.Q_phi =1e9*np.eye(3)
+        self.Q_aug = 1e1*np.eye(3)
+        self.Q_f = 1e4
+        self.Q_w = 1e5
         self.Q_i = np.eye(self.A.shape[1])
-        self.Q_i[0:12,0:12] = block_diag(self.Q_phi, self.Q_v, self.Q_r, self.Q_aug)
+        if self.n == 12:
+            self.Q_i[0:12,0:12] = block_diag(self.Q_phi, self.Q_v, self.Q_r, self.Q_aug)
+        else:
+            self.Q_i[0:9,0:9] = block_diag(self.Q_phi, self.Q_v, self.Q_r)
         # Q_f = 1/(1)
         # Q_w = 1/(0.5)
         self.c1 = 0.2
@@ -206,19 +214,19 @@ class MPC_fixed_wing():
 
     def get_MPC_matrices(self,i):
 
-        Q_hat = np.zeros(self.n*self.Nh)
-        R_hat = np.zeros(self.m*self.Nh)
-        Aqp = np.zeros(self.n*self.Nh,self.n)
-        Bqp = np.zeros(self.n*self.Nh,self.m*self.Nh)
+        Q_hat = np.zeros((self.n*self.Nh,self.n*self.Nh))
+        R_hat = np.zeros((self.m*self.Nh,self.m*self.Nh))
+        Aqp = np.zeros((self.n*self.Nh,self.n))
+        Bqp = np.zeros((self.n*self.Nh,self.m*self.Nh))
 
-        for i in range(0,self.Nh-1):
-            Aqp[i*self.n:(i+1)*self.n,:] = np.linalg.matrix_power(self.A[:,:,i],(i+1))
-            Q_hat[self.n*i:self.n*i+self.n,self.n*i:self.n*i+self.n] =  np.block_diag(self.Q_phi, self.Q_v, self.Q_r, self.Q_aug)
-            R_hat[self.m*i:self.m*i+self.m,self.m*i:self.m*i+self.m] = 10*np.diag([1e3,1e3,1e3,1e1,1e1,1e1])
+        for j in range(0,self.Nh-1):
+            Aqp[j*self.n:(j+1)*self.n,:] = np.linalg.matrix_power(self.A[:,:,i+j],(j+1))
+            Q_hat[self.n*j:self.n*j+self.n,self.n*j:self.n*j+self.n] =  self.Q_i
+            R_hat[self.m*j:self.m*j+self.m,self.m*j:self.m*j+self.m] = np.diag([self.Q_f,self.Q_f,self.Q_f,self.Q_w,self.Q_w,self.Q_w])
 
-        for i in range(0,self.Nh-1):
-            a = np.vstack([np.zeros(((i+1)*self.n,self.n)), np.eye(self.n), Aqp[:-(i+1)*self.n,:]])
-            Bqp[:,self.m*i:self.m*i+self.m] = a[self.n:,:]@self.B[:,:,i]
+        for j in range(0,self.Nh-1):
+            a = np.vstack([np.zeros(((j+1)*self.n,self.n)), np.eye(self.n), Aqp[:-(j+1)*self.n,:]])
+            Bqp[:,self.m*j:self.m*j+self.m] = a[self.n:,:]@self.B[:,:,i+j]
 
         Q_hat[-self.n:,-self.n:] = self.Q_i
         return Q_hat, R_hat, Aqp, Bqp
@@ -232,6 +240,7 @@ class MPC_fixed_wing():
         Aqp_sparse = csc_matrix(Aqp)
         H_sparse = csc_matrix(H)
         # Compute G
+
         G = 2 * Bqp.T @ Q_hat @ Aqp @ self.d_Xi[:,i]
         # Define the quadratic objective function: 0.5 * U^T H U + G^T U
         constraints = ()
@@ -251,8 +260,6 @@ class MPC_fixed_wing():
 
         return dU
     
-
-
     def set_initial_conditions(self, i):
 
         self.X[3:6,i] = self.va_r[:,i] 
@@ -278,8 +285,7 @@ class MPC_fixed_wing():
         # self.references(i,ra_r, va_r, va_r_dot)
         
         # self.calc_K_pid(i)
-        #calculating the errors
-        
+
         self.dC[:,:,i] = self.Cab[:,:,i].T@self.Car[:,:,i]
         # self.dC[:,:,i+1] = self.Cab[:,:,i+1].T@self.Car[:,:,i+1]
         self.d_v = self.Cab[:,:,i].T@(self.va_r[:,i] - self.X[3:6,i]) 
@@ -294,8 +300,7 @@ class MPC_fixed_wing():
         self.abs_f[0,i] = np.linalg.norm(self.dU[0:3,i]) 
         self.abs_w[0,i] =np.linalg.norm(self.dU[3:6,i]) 
 
-        self.dU[:,i] = -self.K_lqr[:,:,i]@self.d_Xi[:,i]
-
+        self.dU[:,i] = self.mpc_outputs(i)
         #state constraints
         # self.f_min, self.tau_min = self.fixed_wing._forces_min(self.Car[:,:,i])
         # self.f_max, self.tau_max = self.fixed_wing._forces_max(self.Car[:,:,i])
@@ -333,8 +338,8 @@ class MPC_fixed_wing():
     def plot_3D(self):
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
-        ax.plot(self.X[6,:-1],self.X[7,:-1],self.X[8,:-1],label = "real trajectory")
-        ax.plot(self.ra_r[0,:-1],self.ra_r[1,:-1],self.ra_r[2,:-1],label = "reference trajectory")
+        ax.plot(self.X[6,:-self.Nh],self.X[7,:-self.Nh],self.X[8,:-self.Nh],label = "real trajectory")
+        ax.plot(self.ra_r[0,:-self.Nh],self.ra_r[1,:-self.Nh],self.ra_r[2,:-self.Nh],label = "reference trajectory")
         ax.set_xlabel('X Label')
         ax.set_ylabel('Y Label')
         ax.set_zlabel('Z Label')
@@ -358,11 +363,17 @@ class MPC_fixed_wing():
         ax.set_ylabel('error')
         ax.legend()
         # plt.show()
-    def plot_force(self):
+    def plot_force_omega(self):
         fig = plt.figure()
-        plt.plot(self.t,self.f_r[0,:],label = "f x")
-        plt.plot(self.t,self.f_r[1,:],label = "f y")
-        plt.plot(self.t,self.f_r[2,:],label = "f z")
+        plt.subplot(2, 1, 1)
+        plt.plot(self.t,self.f[0,:],label = "f x")
+        plt.plot(self.t,self.f[1,:],label = "f y")
+        plt.plot(self.t,self.f[2,:],label = "f z")
+        plt.legend()
+        plt.subplot(2, 1, 2)
+        plt.plot(self.t,self.wb_b_cont[0,:],label = "omega x")
+        plt.plot(self.t,self.wb_b_cont[1,:],label = "omega y")
+        plt.plot(self.t,self.wb_b_cont[2,:],label = "omega z")
         plt.legend()
         # plt.show()
 
@@ -410,16 +421,16 @@ class MPC_fixed_wing():
     def plot_velocity(self):
         fig = plt.figure()
         plt.subplot(3 ,1, 1)
-        plt.plot(self.t[1:-1],self.X[3,1:-1],label = "u")
-        plt.plot(self.t[1:-1],self.va_r[0,1:-1],label = "u_r")
+        plt.plot(self.t[1:-self.Nh],self.X[3,1:-self.Nh],label = "u")
+        plt.plot(self.t[1:-self.Nh],self.va_r[0,1:-self.Nh],label = "u_r")
         plt.legend()
         plt.subplot(3, 1, 2)
-        plt.plot(self.t[1:-1],self.X[4,1:-1],label = "v")
-        plt.plot(self.t[1:-1],self.va_r[1,1:-1],label = "v_r")
+        plt.plot(self.t[1:-self.Nh],self.X[4,1:-self.Nh],label = "v")
+        plt.plot(self.t[1:-self.Nh],self.va_r[1,1:-self.Nh],label = "v_r")
         plt.legend()
         plt.subplot(3, 1, 3)
-        plt.plot(self.t[1:-1],self.X[5,1:-1],label = "w")
-        plt.plot(self.t[1:-1],self.va_r[2,1:-1],label = "w_r")
+        plt.plot(self.t[1:-self.Nh],self.X[5,1:-self.Nh],label = "w")
+        plt.plot(self.t[1:-self.Nh],self.va_r[2,1:-self.Nh],label = "w_r")
         plt.legend()
 
     def plot_velocity_body(self):
@@ -452,40 +463,40 @@ class MPC_fixed_wing():
     def plot_positions(self):
         fig = plt.figure()
         plt.subplot(3, 1, 1)
-        plt.plot(self.t[:-1],self.X[6,:-1],label = "x")
-        plt.plot(self.t[:-1],self.ra_r[0,:-1],label = "x_r")
+        plt.plot(self.t[:-self.Nh],self.X[6,:-self.Nh],label = "x")
+        plt.plot(self.t[:-self.Nh],self.ra_r[0,:-self.Nh],label = "x_r")
         plt.legend()
         plt.subplot(3, 1, 2)
-        plt.plot(self.t[:-1],self.X[7,:-1],label = "y")
-        plt.plot(self.t[:-1],self.ra_r[1,:-1],label = "y_r")
+        plt.plot(self.t[:-self.Nh],self.X[7,:-self.Nh],label = "y")
+        plt.plot(self.t[:-self.Nh],self.ra_r[1,:-self.Nh],label = "y_r")
         plt.legend()
         plt.subplot(3, 1, 3)
-        plt.plot(self.t[:-1],self.X[8,:-1],label = "z")
-        plt.plot(self.t[:-1],self.ra_r[2,:-1],label = "z_r")
+        plt.plot(self.t[:-self.Nh],self.X[8,:-self.Nh],label = "z")
+        plt.plot(self.t[:-self.Nh],self.ra_r[2,:-self.Nh],label = "z_r")
         plt.legend()
 
     def plot_error_position(self):
         fig = plt.figure()
         plt.subplot(3, 1, 1)
-        plt.plot(self.t[:-1],self.X[6,:-1]-self.ra_r[0,:-1],label = "x")
+        plt.plot(self.t[:-self.Nh],self.X[6,:-self.Nh]-self.ra_r[0,:-self.Nh],label = "x")
         plt.legend()
         plt.subplot(3, 1, 2)
-        plt.plot(self.t[:-1],self.X[7,:-1]-self.ra_r[1,:-1],label = "y")
+        plt.plot(self.t[:-self.Nh],self.X[7,:-self.Nh]-self.ra_r[1,:-self.Nh],label = "y")
         plt.legend()
         plt.subplot(3, 1, 3)
-        plt.plot(self.t[:-1],self.X[8,:-1]-self.ra_r[2,:-1],label = "z")
+        plt.plot(self.t[:-self.Nh],self.X[8,:-self.Nh]-self.ra_r[2,:-self.Nh],label = "z")
         plt.legend()
 
     def plot_error_velocity(self):
         fig = plt.figure()
         plt.subplot(3, 1, 1)
-        plt.plot(self.t[:-1],self.X[3,:-1]-self.va_r[0,:-1],label = "u")
+        plt.plot(self.t[:-self.Nh],self.X[3,:-self.Nh]-self.va_r[0,:-self.Nh],label = "u")
         plt.legend()
         plt.subplot(3, 1, 2)
-        plt.plot(self.t[:-1],self.X[4,:-1]-self.va_r[1,:-1],label = "v")
+        plt.plot(self.t[:-self.Nh],self.X[4,:-self.Nh]-self.va_r[1,:-self.Nh],label = "v")
         plt.legend()
         plt.subplot(3, 1, 3)
-        plt.plot(self.t[:-1],self.X[5,:-1]-self.va_r[2,:-1],label = "w")
+        plt.plot(self.t[:-self.Nh],self.X[5,:-self.Nh]-self.va_r[2,:-self.Nh],label = "w")
         plt.legend()
 
     def save_to_csv(self):
