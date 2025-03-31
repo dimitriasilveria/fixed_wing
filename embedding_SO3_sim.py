@@ -19,7 +19,7 @@ class Embedding():
         if (self.tactic == 'circle') or (self.tactic == 'spiral'):
             self.scale = 0 #scale the distortion around the x axis
         else:
-            self.scale = 0.01
+            self.scale = 0.1
         self.hover_height = 2*r
         self.count = 0
         for i in range(self.n):

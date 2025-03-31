@@ -43,7 +43,7 @@ class MPC_fixed_wing():
         
         self.T = self.fixed_wing.dt
         self.N = int((self.t_max-self.t_min)/self.T) #number of points
-        self.Nh = 3
+        self.Nh = 7
 
         ic(self.N)
         #reference trajectories###################################################
@@ -73,9 +73,9 @@ class MPC_fixed_wing():
         self.Nh = 5
         self.Q_v = 1e4*np.eye(3)
         self.Q_r = 1e8*np.eye(3)
-        self.Q_phi =1e9*np.eye(3)
+        self.Q_phi =1e8*np.eye(3)
         self.Q_aug = 1e1*np.eye(3)
-        self.Q_f = 1e4
+        self.Q_f = 1e3
         self.Q_w = 1e5
         self.Q_i = np.eye(self.A.shape[1])
         if self.n == 12:
@@ -196,14 +196,14 @@ class MPC_fixed_wing():
     def calc_A_and_B(self,i):
 
         self.A[3:6,0:3,i]   = (1/self.mb)*(-R3_so3(self.f_r[:,i])) 
-        self.A[3:6,3:6,i]   = -R3_so3(self.wr_r[:,i])  
+        self.A[3:6,3:6,i]   = R3_so3(-self.wr_r[:,i])- R3_so3(self.Car[:,:,i]@self.wr_r[:,i])@self.Car[:,:,i]
         self.A[6:9,3:6,i]   = np.eye(3) 
         self.A[6:9,6:9,i]   = -R3_so3(self.wr_r[:,i]) 
 
         # self.B[5,0,i] = 1/self.mb 
         self.B[3:6, 0:3,i] = np.eye(3)/self.mb
         self.B[0:3, 3:6,i]  = np.eye(3)  
-        self.B[3:6, 3:6,i]  = R3_so3(self.Car[:,:,i].T@self.va_r[:,i])/self.mb
+        self.B[3:6, 3:6,i]  = self.Car[:,:,i].T@R3_so3(self.va_r[:,i])@self.Car[:,:,i]
         if self.n == 12:
             self.A[9:12,3:6,i]  = np.eye(3) 
             self.A[9:12,6:9,i]  = self.c1*np.eye(3) 
