@@ -34,11 +34,12 @@ class Embedding():
         self.phi_cur = np.zeros(self.n)
         self.phi_dot_actual = np.zeros(self.n)
         self.z = np.zeros(self.n)
-        self.target_r = np.zeros((3, self.n))
-        self.target_v = np.zeros((3, self.n))
-        self.target_a = np.zeros((3, self.n))
+
        
     def targets(self, agent_r, agent_v):
+        target_r = np.zeros((3, self.n))
+        target_v = np.zeros((3, self.n))
+        target_a = np.zeros((3, self.n))
         unit = np.zeros((self.n, 3))
 
         unit = np.zeros((self.n, 3))
@@ -58,8 +59,7 @@ class Embedding():
             else:
                 self.z[i] = self.hover_height
 
-            # Circle position
-            # pos = np.array([agent_r[0, i] - self.phi_dot*np.cos(phi_prev[i])*np.sin(phi_prev[i]), agent_r[1, i] - self.r*np.cos(phi_prev[i])**2, agent_r[2, i]-0.6])
+
             pos = np.array([agent_r[0, i] , agent_r[1, i] , agent_r[2, i]-self.z[i]])
 
             pos_rot = self.Rot_des[:,:,i].T@pos.T
@@ -125,13 +125,13 @@ class Embedding():
             # vel_d = (pos_d - np.array([x, y, self.z[i]]))/self.dt
 
             # accel_d = (vel_d - agent_v[:,i])/self.dt
-            vel_d = (pos_d - self.target_r[:,i])/self.dt
+            vel_d = (pos_d - agent_r[:,i])/self.dt
 
-            accel_d = (vel_d - self.target_v[:,i])/self.dt
+            accel_d = (vel_d - agent_v[:,i])/self.dt
 
-            self.target_r[:,i] = pos_d
-            self.target_v[:,i] = vel_d
-            self.target_a[:,i] = accel_d
+            target_r[:,i] = pos_d
+            target_v[:,i] = vel_d
+            target_a[:,i] = accel_d
 
             # if self.tactic == 'circle':
             #     target_r[2,i] = 0.5
@@ -151,7 +151,7 @@ class Embedding():
                 k += 1
         
         
-        return  self.phi_cur,self.target_r, self.target_v, self.target_a, phi_diff, distances
+        return  self.phi_cur,target_r, target_v, target_a, phi_diff, distances
     
 
     def calc_wx(self,phi):

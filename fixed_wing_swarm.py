@@ -12,7 +12,7 @@ r = 190
 T_p = 40
 phi_dot = 2*np.pi/T_p
 ic(phi_dot)
-t_max =4
+t_max =1
 t_min = 0
 k_phi = 15
 tactic = ''
@@ -48,30 +48,27 @@ target_v = target_v_new
 target_a = target_a_new
 controller.references(1,target_r[:,0], target_v[:,0], target_a[:,0])
 controller.set_initial_conditions(1)
-for i in range(1,N-1):
-
-    _,target_r_new, target_v_new, target_a_new, _, _ = embedding.targets(target_r,target_v)
-    target_r = target_r_new
-    target_v = target_v_new
-    target_a = target_a_new
-    controller.references(i,target_r[:,0], target_v[:,0], target_a[:,0])
-    controller.calc_A_and_B(i)
-
-# for i in range(N,1,-1):
-#     controller.calc_K_lqr(i)
-
 
 pos_real = target_r
 vel_real = target_v
 # controller.plot_references()
-plt.show()
+# plt.show()
 for i in range(1,N-Nh):
-    # _,target_r, target_v, target_a, _, _ = embedding.targets(pos_real,vel_real)
-    np.clip(target_a, -10, 10)
-    np.clip(target_v, -40, 40)
+    for j in range(i,Nh+i):
+        _,target_r_new, target_v_new, target_a_new, _, _ = embedding.targets(pos_real,vel_real)
+        if j == i:
+            target_r = target_r_new
+            target_v = target_v_new
+            target_a = target_a_new
+        pos_real = target_r_new
+        vel_real = target_v_new
+        controller.references(j,target_r_new[:,0], target_v_new[:,0], target_a_new[:,0])
+        controller.calc_A_and_B(j)
+    # np.clip(target_a, -10, 10)
+    # np.clip(target_v, -40, 40)
     controller.control(i, target_r[:,0], target_v[:,0], target_a[:,0])
-    pos_real = controller.X[6:9,i+1].reshape(-1,1)
-    vel_real = controller.X[3:6,i+1].reshape(-1,1)
+    pos_real = target_r
+    vel_real = target_v
 
 # controller.plot_angles()
 controller.plot_3D()
