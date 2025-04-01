@@ -20,8 +20,9 @@ from scipy.linalg import block_diag
 
 #Initiating constants##############################################
 class MPC_fixed_wing():
-    def __init__(self,t_max, t_min, r, T_p):
+    def __init__(self,t_max, t_min, r, T_p, id):
         #fixed wing model
+        self.id = id
         self.fixed_wing = FixedWing("/home/dimitria/fixed_wing/pyfly/pyfly/pyfly_config.json", "/home/dimitria/fixed_wing/pyfly/pyfly/x8_param.mat")
         self.n = 12
         self.m = 6
@@ -343,6 +344,7 @@ class MPC_fixed_wing():
         ax.set_xlabel('X Label')
         ax.set_ylabel('Y Label')
         ax.set_zlabel('Z Label')
+        ax.set_title("Agent " + self.id)
         # ax.set_zlim(-1,0.1)
         # ax.set_ylim(0, 5)
         # ax.set_xlim(190, 200)
@@ -361,6 +363,7 @@ class MPC_fixed_wing():
         ax.plot(self.t[:-self.Nh],self.abs_w[0,:-self.Nh],label = "w error")
         ax.set_xlabel('time')
         ax.set_ylabel('error')
+        ax.set_title("Agent " + self.id)
         ax.legend()
         # plt.show()
     def plot_force_omega(self):
@@ -375,11 +378,13 @@ class MPC_fixed_wing():
         plt.plot(self.t[:-self.Nh],self.wb_b_cont[1,:-self.Nh],label = "omega y")
         plt.plot(self.t[:-self.Nh],self.wb_b_cont[2,:-self.Nh],label = "omega z")
         plt.legend()
+        plt.title("Agent " + self.id)
         # plt.show()
 
     def plot_acceleration(self):
         fig = plt.figure()
         plt.subplot(2, 1, 1)
+        plt.title("Agent " + self.id)
         plt.plot(self.t[:-self.Nh],self.va_r_dot_body[0,:-self.Nh],label = "a_x")
         plt.plot(self.t[:-self.Nh],self.va_r_dot_body[1,:-self.Nh],label = "a_y")
         plt.plot(self.t[:-self.Nh],self.va_r_dot_body[2,:-self.Nh],label = "a_z")
@@ -390,10 +395,12 @@ class MPC_fixed_wing():
         plt.plot(self.t[:-self.Nh],self.va_r[1,:-self.Nh],label = "v_y")
         plt.plot(self.t[:-self.Nh],self.va_r[2,:-self.Nh],label = "v_z")
         plt.legend()
+        
         # plt.show()
     def plot_controls(self):
         fig = plt.figure()
         plt.subplot(2, 1, 1)
+        plt.title("Agent " + self.id)
         plt.plot(self.t[:-self.Nh],self.X[0,:-self.Nh],label = "w_actual_x")
         plt.plot(self.t[:-self.Nh],self.X[1,:-self.Nh],label = "w_actual_y")
         plt.plot(self.t[:-self.Nh],self.X[2,:-self.Nh],label = "w_actual_z")
@@ -408,6 +415,7 @@ class MPC_fixed_wing():
     def plot_references(self):
         fig = plt.figure()
         plt.subplot(2, 1, 1)
+        plt.title("Agent " + self.id)
         plt.plot(self.t[:-self.Nh],self.f_r[0,:-self.Nh],label = "f_x")
         plt.plot(self.t[:-self.Nh],self.f_r[1,:-self.Nh],label = "f_y")
         plt.plot(self.t[:-self.Nh],self.f_r[2,:-self.Nh],label = "f_z")
@@ -421,6 +429,7 @@ class MPC_fixed_wing():
     def plot_velocity(self):
         fig = plt.figure()
         plt.subplot(3 ,1, 1)
+        plt.title("Agent " + self.id)
         plt.plot(self.t[1:-self.Nh],self.X[3,1:-self.Nh],label = "u")
         plt.plot(self.t[1:-self.Nh],self.va_r[0,1:-self.Nh],label = "u_r")
         plt.legend()
@@ -436,6 +445,7 @@ class MPC_fixed_wing():
     def plot_velocity_body(self):
         fig = plt.figure()
         plt.subplot(3 ,1, 1)
+        plt.title("Agent " + self.id)
         plt.plot(self.t[1:-self.Nh],self.va_r_body[0,1:-self.Nh],label = "u_r")
         plt.legend()
         plt.subplot(3, 1, 2)
@@ -448,6 +458,7 @@ class MPC_fixed_wing():
     def plot_angles(self):
         fig = plt.figure()
         plt.subplot(3, 1, 1)
+        plt.title("Agent " + self.id)
         plt.plot(self.t[:-self.Nh],np.rad2deg(self.angels[0,:-self.Nh]),label = "phi")
         plt.plot(self.t[:-self.Nh],np.rad2deg(self.des_angles[0,:-self.Nh]),label = "phi_r")
         plt.legend()
@@ -463,6 +474,7 @@ class MPC_fixed_wing():
     def plot_positions(self):
         fig = plt.figure()
         plt.subplot(3, 1, 1)
+        plt.title("Agent " + self.id)
         plt.plot(self.t[:-self.Nh],self.X[6,:-self.Nh],label = "x")
         plt.plot(self.t[:-self.Nh],self.ra_r[0,:-self.Nh],label = "x_r")
         plt.legend()
@@ -478,6 +490,7 @@ class MPC_fixed_wing():
     def plot_error_position(self):
         fig = plt.figure()
         plt.subplot(3, 1, 1)
+        plt.title("Agent " + self.id)
         plt.plot(self.t[:-self.Nh],self.X[6,:-self.Nh]-self.ra_r[0,:-self.Nh],label = "x")
         plt.legend()
         plt.subplot(3, 1, 2)
@@ -490,6 +503,7 @@ class MPC_fixed_wing():
     def plot_error_velocity(self):
         fig = plt.figure()
         plt.subplot(3, 1, 1)
+        plt.title("Agent " + self.id)
         plt.plot(self.t[:-self.Nh],self.X[3,:-self.Nh]-self.va_r[0,:-self.Nh],label = "u")
         plt.legend()
         plt.subplot(3, 1, 2)
