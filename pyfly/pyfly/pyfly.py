@@ -941,6 +941,8 @@ class PyFly:
         if config_kw is not None:
             set_config_attrs(self.cfg, config_kw)
 
+        self.next_attitude = np.array([0,0,0,1])
+
         self.state = {}
         self.attitude_states = ["roll", "pitch", "yaw"]
         self.actuator_states = ["elevator", "aileron", "rudder", "throttle", "elevon_left", "elevon_right"]
@@ -1092,7 +1094,7 @@ class PyFly:
         else:
             raise ValueError("Unexpected value {} for mode".format(mode))
 
-    def step(self, commands):
+    def step(self, commands, attitude_next):
         """
         Perform one integration step from t to t + dt.
 
@@ -1101,6 +1103,7 @@ class PyFly:
         """
         success = True
         info = {}
+        self.next_attitude = attitude_next
 
         # Record command history and apply conditions on actuator setpoints
         control_inputs = self.actuation.set_and_constrain_commands(commands)
@@ -1111,11 +1114,11 @@ class PyFly:
         y0.extend(self.actuation.get_values())
         y0 = np.array(y0)
         try:
-            # sol = scipy.integrate.solve_ivp(fun=lambda t, y: self._dynamics(t, y), t_span=(0, self.dt),
-            #                                 y0=y0,t_eval=[self.dt])#,max_step=self.dt / 10)
-            # self._set_states_from_ode_solution(sol.y[:, -1], save=True)
-            y_next = self._runge_kutta4_step(y0, self.dt)
-            self._set_states_from_ode_solution(y_next, save=True)
+            sol = scipy.integrate.solve_ivp(fun=lambda t, y: self._dynamics(t, y), t_span=(0, self.dt),
+                                            y0=y0,t_eval=[self.dt])#,max_step=self.dt / 10)
+            self._set_states_from_ode_solution(sol.y[:, -1], save=True)
+            # y_next = self._runge_kutta4_step(y0, self.dt)
+            # self._set_states_from_ode_solution(y_next, save=True)
 
             # # Append velocities to velocities.csv
             # velocities_data = {
@@ -1203,7 +1206,7 @@ class PyFly:
         :param dt: (float) time step
         :return: (numpy array) next state vector
         """
-
+        n=5
         k1 = self._dynamics(0, y)
         k2 = self._dynamics(dt / 2, y + (dt / 2) * k1)
         k3 = self._dynamics(dt / 2, y + (dt / 2) * k2)
@@ -1226,6 +1229,7 @@ class PyFly:
             self._set_states_from_ode_solution(y, save=False)
 
         attitude = y[:4]
+        # attitude = self.state["attitude"].value
         omega = self.get_states_vector(["omega_p", "omega_q", "omega_r"])
         vel = np.array(self.get_states_vector(["velocity_u", "velocity_v", "velocity_w"]))
 
@@ -1537,10 +1541,16 @@ class PyFly:
         """
         p, q, r = omega
         Rot = R.from_quat(attitude).as_matrix()
-        w_x = self.dt*np.array([[ 0 , -r,  q],
+        # ic(R.from_quat(attitude).as_euler('xyz', degrees=True))
+        
+        w_x = -np.array([[ 0 , -r,  q],
             [r,   0, -p],
             [-q,  p,   0]])
-        next_attitude = Rot@expm(w_x)
+        next_attitude = Rot@w_x
+        # next_attitude = self.next_attitude
+        # ic(R.from_quat(next_attitude).as_euler('xyz', degrees=True))
+        # input()
+        # ic(omega)
         return R.from_matrix(next_attitude).as_quat()
         # return self.state["attitude"].value
 
@@ -1680,7 +1690,7 @@ class PyFly:
         :param save: (bool) whether to save values to state history, i.e. whether solution represents final step
         solution or intermediate values during integration.
         """
-        self.state["attitude"].set_value(ode_sol[:4] / np.linalg.norm(ode_sol[:4]))
+        self.state["attitude"].set_value(ode_sol[:4])# / np.linalg.norm(ode_sol[:4]))
         if save:
             euler_angles = self.state["attitude"].as_euler_angle()
             self.state["roll"].set_value(euler_angles["roll"], save=save)
@@ -1701,6 +1711,7 @@ class PyFly:
         self.state["velocity_v"].set_value(ode_sol[start_i + 7], save=save)
         self.state["velocity_w"].set_value(ode_sol[start_i + 8], save=save)
         self.actuation.set_states(ode_sol[start_i + 9:], save=save)
+
         #printing states
         # Rot = R.from_quat(self.state["attitude"].value).as_matrix()
         # ic(self.state["omega_p"].value,self.state["omega_q"].value,self.state["omega_r"].value)

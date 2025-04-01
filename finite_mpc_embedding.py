@@ -70,7 +70,7 @@ class MPC_fixed_wing():
         self.va_r_body = np.zeros((3,self.N))
         # p = np.array([-5,-2.5, -1.1,-2.3,-0.5,-1.5,-2.2,-3.1,-2])
         # p = np.array([-5,-2.5, -10.1,-2.3,-0.5,-1.5,-2.2,-3.1,-2,-6.5,-3.4,-8])
-        self.Nh = 5
+        self.Nh = 10
         self.Q_v = 1e4*np.eye(3)
         self.Q_r = 1e8*np.eye(3)
         self.Q_phi =1e8*np.eye(3)

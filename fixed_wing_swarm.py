@@ -12,7 +12,7 @@ r = 190
 T_p = 40
 phi_dot = 2*np.pi/T_p
 ic(phi_dot)
-t_max =40
+t_max =4
 t_min = 0
 k_phi = 15
 tactic = ''
