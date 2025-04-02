@@ -36,7 +36,7 @@ class Embedding():
         self.z = np.zeros(self.n)
 
        
-    def targets(self, agent_r, agent_v):
+    def targets(self, agent_r, agent_v, correct):
         target_r = np.zeros((3, self.n))
         target_v = np.zeros((3, self.n))
         target_a = np.zeros((3, self.n))
@@ -86,7 +86,7 @@ class Embedding():
                 self.z[i] = self.hover_height
             if self.n > 1:
                 phi_i = self.phi_cur[i]
-                if i == 0:
+                if i == 0 and correct:
                     phi_k = self.phi_cur[self.n-1] #ahead
                     phi_j = self.phi_cur[i+1] #behind
                 elif i == self.n-1:
@@ -166,8 +166,8 @@ class Embedding():
         R_i = R.from_euler('z', phi_i, degrees=False).as_matrix()
         R_j = R.from_euler('z', phi_j, degrees=False).as_matrix()
         R_k = R.from_euler('z', phi_k, degrees=False).as_matrix()
-        R_ji = R_j.T@R_i
-        R_ki = R_k.T@R_i
+        R_ji = R_i.T@R_j
+        R_ki = R_i.T@R_k
 
         w_diff_ji = so3_R3(logm(R_ji.T))[2]
         w_diff_ki = so3_R3(logm(R_ki.T))[2]
@@ -179,7 +179,7 @@ class Embedding():
         phi_dot_des = self.phi_dot +  k*(1/(w_diff_ji.real) + 1/(w_diff_ki.real)) # 0.1*(w_neg.real + w_pos.real) #+ np.clip(-0.5/(w_diff_ij.real) + 0.5/(w_diff_ki.real),-0.5,0.5)
 
 
-        return np.clip(phi_dot_des,0.1,1)
+        return np.clip(phi_dot_des,0.1,0.5)
 
 
     def cart2pol(self,pos_rot):

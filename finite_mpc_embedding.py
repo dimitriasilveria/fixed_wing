@@ -70,11 +70,11 @@ class MPC_fixed_wing():
         # p = np.array([-5,-2.5, -1.1,-2.3,-0.5,-1.5,-2.2,-3.1,-2])
         # p = np.array([-5,-2.5, -10.1,-2.3,-0.5,-1.5,-2.2,-3.1,-2,-6.5,-3.4,-8])
         self.Nh = 10
-        self.Q_v = 1e4*np.eye(3)
-        self.Q_r = 1e8*np.eye(3)
+        self.Q_v = 10**(3)*np.eye(3)
+        self.Q_r = 1e7*np.eye(3)
         self.Q_phi =1e8*np.eye(3)
         self.Q_aug = 1e1*np.eye(3)
-        self.Q_f = 1e3
+        self.Q_f = 1e2
         self.Q_w = 1e5
         self.Q_i = np.eye(self.n)
         if self.n == 12:
