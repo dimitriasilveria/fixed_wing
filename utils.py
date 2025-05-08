@@ -99,3 +99,11 @@ def references(fixed_wing, x_dot, x_dot_dot, dt,N,n_agents):
             else:
                 Wr_r[:,a] = np.zeros(3)
     return fa_r,Car, Wr_r
+
+def jacobian(w):
+    theta = np.linalg.norm(w)
+    if theta == 0:
+        return np.eye(3)
+    else:
+        a = R3_so3(w/theta)
+        return np.eye(3) + ((1-np.cos(theta))/theta**2)*a + ((theta - np.sin(theta))/theta**3)*a@a

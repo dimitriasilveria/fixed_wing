@@ -19,7 +19,7 @@ class Embedding():
         if (self.tactic == 'circle') or (self.tactic == 'spiral'):
             self.scale = 0 #scale the distortion around the x axis
         else:
-            self.scale = 0.1
+            self.scale = 0.5
         self.hover_height = 2*r
         self.count = 0
         for i in range(self.n):
@@ -112,8 +112,8 @@ class Embedding():
             pos_d_hat = Rot_z@pos_d_hat
             phi_d, _, = self.cart2pol(pos_d_hat)
 
-            phi_dot_x = self.calc_wx(phi_d)#*(phi_d-self.phi_des[i])
-            phi_dot_y = self.calc_wy(phi_d) #phi_i-phi_prev[i]*
+            phi_dot_x = self.calc_wx(phi_i)#*(phi_d-self.phi_des[i])
+            phi_dot_y = self.calc_wy(phi_i) #phi_i-phi_prev[i]*
             v_d_hat_x_y = np.array([phi_dot_x, phi_dot_y, 0])
             self.Rot_des[:,:,i] = expm(R3_so3(v_d_hat_x_y))
      

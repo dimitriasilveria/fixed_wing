@@ -25,9 +25,10 @@ class FixedWing():
             self.cfg = json.load(config_file)
         self.params["ar"] = self.params["b"] ** 2 / self.params["S_wing"]
         self.mb= self.params["mass"]
+
         self.rho = self.cfg["rho"]
         self.g = 9.81
-        self.h = 0.005
+        self.h = 0.0005
         self.dt = 0.01
         self.x = np.zeros(9)
         self.R = np.eye(3)
@@ -39,6 +40,8 @@ class FixedWing():
         self.tau_min = None
         self.f_max = None
         self.tau_max = None
+        self.K_w = np.diag([5,5,5])
+        self.K_i = np.diag([3,3,3])
 
         for variable in self.cfg["variables"]:
             if variable["name"] == "elevator":
@@ -72,9 +75,14 @@ class FixedWing():
                 self.velocity_w_max = variable["init_max"]
 
     def _v_dot(self,v_b, w_b, f):
+        #ic(f/self.mb - np.cross(w_b,v_b))
+        #ic(w_b,v_b,f)
+
         return f/self.mb - np.cross(w_b,v_b)
     
     def _w_dot(self, w_b, tau):
+        #ic(np.linalg.inv(self.J)@(tau - np.cross(w_b, self.J@w_b)))
+        #ic(tau)
         return np.linalg.inv(self.J)@(tau - np.cross(w_b, self.J@w_b))
     
     # def _R_dot(self, R, w):
@@ -90,7 +98,7 @@ class FixedWing():
 
     def _f(self,t,x, inputs):
         w = x[0:3]
-        v_b = x[3:6]
+        v_b = self.R.T@x[3:6]
         f = inputs[0:3]
         tau = inputs[3:6]
         dv_dt = self._v_dot(v_b, w, f)

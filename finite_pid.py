@@ -34,7 +34,7 @@ class PID_fixed_wing():
         self.T_p = 40
         # self.r = 100
         # self.T_p = 25
-        self.t_max =3#/5
+        self.t_max =1#/5
         self.t_min = 0
         
         self.T = self.fixed_wing.dt
@@ -112,23 +112,35 @@ class PID_fixed_wing():
 
 
     def references(self,i):
+        # self.ra_r[:,i] = ra_r
+        if i >=1:
+            self.va_r[:,i] = (self.ra_r[:,i]-self.ra_r[:,i-1])/self.T
+            self.va_r_dot[:,i] = (self.va_r[:,i]-self.va_r[:,i-1])/self.T
+        # else:
+        #     self.va_r[:,i] = va_r
+        #     self.va_r_dot[:,i] = va_r_dot
+        norm_v = np.linalg.norm(self.va_r[:,i])
+        v_norm = self.va_r[:,i]/norm_v
+
+        # v_xy_norm = np.linalg.norm(self.va_r[0:2,i])
+        # a_perpendicular = self.va_r_dot[:,i] - np.dot(self.va_r_dot[:,i],v_norm)*v_norm
+        # phi = np.arctan2(a_perpendicular[1],self.g+a_perpendicular[2])
+        # phi = np.arctan2(np.linalg.norm(a_perpendicular),self.g)
+
+
         
-        #attitude = R.from_matrix(Car[:,:,i]).as_quat()
-        v_norm = self.va_r[:,i]/np.linalg.norm(self.va_r[:,i])
-        v_xy_norm = np.linalg.norm(self.va_r[0:2,i])
-
-        phi = np.arctan2(np.linalg.norm(self.va_r[:,i])**2,self.g*self.r)
-        #correcting the acceleration
-        # self.va_r_dot[:,i] = self.va_r_dot[:,i] - np.array([0,0,self.g - (self.g/np.cos(phi))]) 
-        #yaw (psi)
-
-        psi = np.arctan2(v_norm[1],v_norm[0])
         #pitch (theta)
-        theta = np.arctan2(self.va_r_dot[2,i],v_xy_norm)
+        # theta = np.arctan2(self.va_r_dot[2,i],v_xy_norm)
+        if np.linalg.norm(self.va_r[:,i]) == 0:
+            theta = 0
+            psi = 0
+        else:
+            psi = np.arctan2(v_norm[1],v_norm[0])
+            theta = -np.arcsin(self.va_r[2,i]/norm_v)
+        phi = np.arctan2(-norm_v**2*np.cos(theta),self.r*self.g)
 
 
-
-        if i == 0:
+        if i == 2:
             ic(np.rad2deg(phi))
             ic("minimum lift: ", self.mb*self.g/np.cos(phi))
 
@@ -155,27 +167,34 @@ class PID_fixed_wing():
         self.Car[:,:,i+1] =  (Rz @ Ry @ Rx) #@Rx_180
         self.des_angles[:,i] = np.array([phi,theta,psi])
 
-            
+        if i == 0:
+            self.Car[:,:,i] = self.Car[:,:,i+1]@R.from_euler('xyz', [0, 0, 0.01]).as_matrix()
 
         # self.Car[:,:,i] = np.hstack((x_B.reshape(3,1), y_B.reshape(3,1), z_B.reshape(3,1)))#@R.from_euler('xyz', [np.pi/100, 0, 0]).as_matrix()
         if i > 1 :
-            Omega_t = np.array([
-                [1, np.sin(phi)*np.tan(theta),          np.cos(phi)*np.tan(theta)],
-                [0, np.cos(phi),                        -np.sin(phi)],
-                [0, np.sin(phi)/np.cos(theta),           np.cos(phi)/np.cos(theta)]])
-            self.wr_r[:,i] = so3_R3(logm(self.Car[:,:,i].T@self.Car[:,:,i+1]))/self.T
 
+            mat= self.Car[:,:,i].T@self.Car[:,:,i+1]
+            self.wr_r[:,i] = so3_R3(logm(mat))/self.T
+            g_body = self.Car[:,:,i].T@self.ga
+            
+            # self.wr_r[:,i] = np.clip(self.wr_r[:,i],-np.pi,np.pi)
             v_body = self.Car[:,:,i].T@self.va_r[:,i]
             a_body  = self.Car[:,:,i].T@self.va_r_dot[:,i]
+            # self.wr_r[1,i] = -(a_body[2]+g_body[2])/norm_v
+            # self.wr_r[2,i] = g_body[1]/norm_v
             self.va_r_dot_body[:,i] = a_body
             self.va_r_body[:,i] = v_body
             # wr_r_inertial = self.Calr[:,:,i]@self.wr_r[:,i]
             # self.f_r[:,i] = self.mb*(self.va_r_dot[:,i] - self.g*self.z_w  + np.cross(wr_r_inertial,self.va_r[:,i]))
-            self.f_r[:,i] = self.mb*(a_body + np.cross(self.wr_r[:,i],v_body)) 
-            self.d_wr_r[:,i] = (self.wr_r[:,i] - self.wr_r[:,i-1])/self.T
+            self.f_r[:,i] = self.mb*(a_body + np.cross(self.wr_r[:,i],self.va_r_body[:,i])) 
+            if i > 2 :
+                self.d_wr_r[:,i] = (self.wr_r[:,i] - self.wr_r[:,i-1])/self.T
             self.tau_r[:,i] = self.J@self.d_wr_r[:,i] + np.cross(self.wr_r[:,i], self.J@self.wr_r[:,i])
 
         else:
+            a_body  = self.Car[:,:,i].T@self.va_r_dot[:,i]
+            self.va_r_dot_body[:,i] = a_body
+            self.va_r_body[:,i] = self.Car[:,:,i].T@self.va_r[:,i]
             self.f_r[:,i] = self.Car[:,:,i].T@(self.mb*self.va_r_dot[:,i] ) 
             # if np.linalg.det(self.Car[:,:,i]) != 0 and np.linalg.det(self.Car[:,:,i+1]) != 0:
                 
@@ -184,15 +203,17 @@ class PID_fixed_wing():
 
     def calc_A_and_B(self,i):
 
-        self.A[3:6,0:3,i]   = (1/self.mb)*(-R3_so3(self.f_r[:,i])) 
-        self.A[3:6,3:6,i]   = -R3_so3(self.wr_r[:,i])  
+        self.A[:,:,i]   = np.zeros((self.n,self.n))
+        self.B[:,:,i]   = np.zeros((self.n,self.m))
+        self.A[3:6,0:3,i]   = R3_so3(self.wr_r[:,i])@R3_so3(self.va_r[:,i])# - R3_so3(self.f_r[:,i])
+        self.A[3:6,3:6,i]   = R3_so3(self.wr_r[:,i])- R3_so3(self.wr_r[:,i])@self.Car[:,:,i]
         self.A[6:9,3:6,i]   = np.eye(3) 
         self.A[6:9,6:9,i]   = -R3_so3(self.wr_r[:,i]) 
 
         # self.B[5,0,i] = 1/self.mb 
         self.B[3:6, 0:3,i] = np.eye(3)/self.mb
         self.B[0:3, 3:6,i]  = np.eye(3)  
-        self.B[3:6, 3:6,i]  = R3_so3(self.Car[:,:,i].T@self.va_r[:,i])/self.mb
+        self.B[3:6, 3:6,i]  = - R3_so3(self.va_r[:,i])
         if self.n == 12:
             self.A[9:12,3:6,i]  = np.eye(3) 
             self.A[9:12,6:9,i]  = self.c1*np.eye(3) 

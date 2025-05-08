@@ -1,5 +1,5 @@
 import numpy as np
-from utils import R3_so3, dX_to_dXi, references, so3_R3, SE3_se3_back
+from utils import R3_so3, dX_to_dXi, so3_R3, SE3_se3_back
 from scipy.linalg import expm, logm
 from numpy.linalg import matrix_rank
 from scipy.linalg import block_diag
@@ -11,6 +11,8 @@ from scipy.spatial.transform import Rotation as R
 from scipy.linalg import expm, logm
 import matplotlib.pyplot as plt 
 from mpl_toolkits.mplot3d import Axes3D
+# import matplotlib as mpl
+# mpl.rcParams['text.usetex'] = True
 import os
 from icecream import ic
 import csv
@@ -20,14 +22,16 @@ from scipy.linalg import block_diag
 
 #Initiating constants##############################################
 class MPC_fixed_wing():
-    def __init__(self,t_max, t_min, r, T_p, id):
+    def __init__(self,t_max, t_min, r, T_p, id, noise = False, save = False):
         #fixed wing model
         self.id = id
+        self.noise = noise
+        self.save = save
         self.fixed_wing = FixedWing("/home/dimitria/fixed_wing/pyfly/pyfly/pyfly_config.json", "/home/dimitria/fixed_wing/pyfly/pyfly/x8_param.mat")
-        self.n = 12
+        self.n = 9
         self.m = 6
         self.qsi = np.zeros((self.n,1)) 
-        self.n_agents = 1
+        self.n_agents = 4
         self.mb = self.fixed_wing.mb
         self.g = self.fixed_wing.g
         self.J = self.fixed_wing.J
@@ -69,13 +73,13 @@ class MPC_fixed_wing():
         self.va_r_body = np.zeros((3,self.N))
         # p = np.array([-5,-2.5, -1.1,-2.3,-0.5,-1.5,-2.2,-3.1,-2])
         # p = np.array([-5,-2.5, -10.1,-2.3,-0.5,-1.5,-2.2,-3.1,-2,-6.5,-3.4,-8])
-        self.Nh = 10
+        self.Nh = 3
         self.Q_v = 10**(3)*np.eye(3)
-        self.Q_r = 1e7*np.eye(3)
-        self.Q_phi =1e8*np.eye(3)
+        self.Q_r = 1e6*np.eye(3)
+        self.Q_phi =1e1*np.eye(3)
         self.Q_aug = 1e1*np.eye(3)
-        self.Q_f = 1e2
-        self.Q_w = 1e5
+        self.Q_f = 1e1
+        self.Q_w = 1e1
         self.Q_i = np.eye(self.n)
         if self.n == 12:
             self.Q_i[0:12,0:12] = block_diag(self.Q_phi, self.Q_v, self.Q_r, self.Q_aug)
@@ -90,6 +94,7 @@ class MPC_fixed_wing():
         self.Cab = np.zeros((3,3,self.N))
         self.Cab[:,:,0] = np.eye(3) #eul2rotm([pi*0.5 0 0])*Ca_r(:,:,1) #
         self.f = np.zeros((3,self.N))  #actual force
+        self.f_r_body = np.zeros((3,self.N))  #actual force in body frame
         self.tau = np.zeros((3,self.N))  #actual torque
         # self.f_A = np.zeros((3,self.N))  #actual aerodynamics force
         self.wb_b_cont = np.zeros((3,self.N)) #angular velocity input
@@ -118,26 +123,34 @@ class MPC_fixed_wing():
             
     def references(self,i, ra_r, va_r, va_r_dot):
         self.ra_r[:,i] = ra_r
-        self.va_r[:,i] = va_r
-        self.va_r_dot[:,i] = va_r_dot
-        #attitude = R.from_matrix(Car[:,:,i]).as_quat()
-        v_norm = self.va_r[:,i]/np.linalg.norm(self.va_r[:,i])
-        v_xy_norm = np.linalg.norm(self.va_r[0:2,i])
-        a_perpendicular = self.va_r_dot[:,i] - np.dot(self.va_r_dot[:,i],v_norm)*v_norm
-        phi = np.arctan2(a_perpendicular[1],self.g+a_perpendicular[2])
-        phi = np.arctan2(np.linalg.norm(a_perpendicular),self.g)
-        # phi = np.arctan2(np.linalg.norm(self.va_r[:,i])**2,self.g*self.r)
-        #correcting the acceleration
-        # self.va_r_dot[:,i] = self.va_r_dot[:,i] - np.array([0,0,self.g - (self.g/np.cos(phi))]) 
-        #yaw (psi)
+        if i >=1:
+            self.va_r[:,i] = (self.ra_r[:,i]-self.ra_r[:,i-1])/self.T
+            self.va_r_dot[:,i] = (self.va_r[:,i]-self.va_r[:,i-1])/self.T
+        # else:
+        #     self.va_r[:,i] = va_r
+        #     self.va_r_dot[:,i] = va_r_dot
+        norm_v = np.linalg.norm(self.va_r[:,i])
+        v_norm = self.va_r[:,i]/norm_v
 
-        psi = np.arctan2(v_norm[1],v_norm[0])
+        # v_xy_norm = np.linalg.norm(self.va_r[0:2,i])
+        # a_perpendicular = self.va_r_dot[:,i] - np.dot(self.va_r_dot[:,i],v_norm)*v_norm
+        # phi = np.arctan2(a_perpendicular[1],self.g+a_perpendicular[2])
+        # phi = np.arctan2(np.linalg.norm(a_perpendicular),self.g)
+
+
+        
         #pitch (theta)
-        theta = np.arctan2(self.va_r_dot[2,i],v_xy_norm)
+        # theta = np.arctan2(self.va_r_dot[2,i],v_xy_norm)
+        if np.linalg.norm(self.va_r[:,i]) == 0:
+            theta = 0
+            psi = 0
+        else:
+            psi = np.arctan2(v_norm[1],v_norm[0])
+            theta = -np.arcsin(self.va_r[2,i]/norm_v)
+        phi = np.arctan2(-norm_v**2*np.cos(theta),self.r*self.g)
 
 
-
-        if i == 0:
+        if i == 2:
             ic(np.rad2deg(phi))
             ic("minimum lift: ", self.mb*self.g/np.cos(phi))
 
@@ -169,41 +182,49 @@ class MPC_fixed_wing():
 
         # self.Car[:,:,i] = np.hstack((x_B.reshape(3,1), y_B.reshape(3,1), z_B.reshape(3,1)))#@R.from_euler('xyz', [np.pi/100, 0, 0]).as_matrix()
         if i > 1 :
-            Omega_t = np.array([
-                [1, np.sin(phi)*np.tan(theta),          np.cos(phi)*np.tan(theta)],
-                [0, np.cos(phi),                        -np.sin(phi)],
-                [0, np.sin(phi)/np.cos(theta),           np.cos(phi)/np.cos(theta)]])
-            self.wr_r[:,i] = so3_R3(logm(self.Car[:,:,i].T@self.Car[:,:,i+1]))/self.T
-            self.wr_r[:,i] = np.clip(self.wr_r[:,i],-np.pi,np.pi)
+
+            mat= self.Car[:,:,i].T@self.Car[:,:,i+1]
+            self.wr_r[:,i] = so3_R3(logm(mat))/self.T
+            
+            
+            # self.wr_r[:,i] = np.clip(self.wr_r[:,i],-np.pi,np.pi)
             v_body = self.Car[:,:,i].T@self.va_r[:,i]
             a_body  = self.Car[:,:,i].T@self.va_r_dot[:,i]
+            # g_body = self.Car[:,:,i].T@self.ga
+            # self.wr_r[1,i] = -(a_body[2]+g_body[2])/norm_v
+            # self.wr_r[2,i] = g_body[1]/norm_v
             self.va_r_dot_body[:,i] = a_body
             self.va_r_body[:,i] = v_body
             # wr_r_inertial = self.Calr[:,:,i]@self.wr_r[:,i]
             # self.f_r[:,i] = self.mb*(self.va_r_dot[:,i] - self.g*self.z_w  + np.cross(wr_r_inertial,self.va_r[:,i]))
-            self.f_r[:,i] = self.mb*(a_body + np.cross(self.wr_r[:,i],v_body)) 
-            self.d_wr_r[:,i] = (self.wr_r[:,i] - self.wr_r[:,i-1])/self.T
+            self.f_r[:,i] = self.mb*(a_body + np.cross(self.wr_r[:,i],self.va_r_body[:,i])) 
+            if i > 2 :
+                self.d_wr_r[:,i] = (self.wr_r[:,i] - self.wr_r[:,i-1])/self.T
             self.tau_r[:,i] = self.J@self.d_wr_r[:,i] + np.cross(self.wr_r[:,i], self.J@self.wr_r[:,i])
 
         else:
+            a_body  = self.Car[:,:,i].T@self.va_r_dot[:,i]
+            self.va_r_dot_body[:,i] = a_body
+            self.va_r_body[:,i] = self.Car[:,:,i].T@self.va_r[:,i]
             self.f_r[:,i] = self.Car[:,:,i].T@(self.mb*self.va_r_dot[:,i] ) 
             # if np.linalg.det(self.Car[:,:,i]) != 0 and np.linalg.det(self.Car[:,:,i+1]) != 0:
                 
             # else:
             #     self.wr_r[:,i] = np.zeros(3)
 
+
     def calc_A_and_B(self,i):
         self.A[:,:,i]   = np.zeros((self.n,self.n))
         self.B[:,:,i]   = np.zeros((self.n,self.m))
-        self.A[3:6,0:3,i]   = (1/self.mb)*(-R3_so3(self.f_r[:,i])) 
-        self.A[3:6,3:6,i]   = R3_so3(-self.wr_r[:,i])- R3_so3(self.Car[:,:,i]@self.wr_r[:,i])@self.Car[:,:,i]
+        self.A[3:6,0:3,i]   = R3_so3(self.wr_r[:,i])@R3_so3(self.va_r[:,i])# - R3_so3(self.f_r[:,i])
+        self.A[3:6,3:6,i]   = R3_so3(self.wr_r[:,i])- R3_so3(self.wr_r[:,i])@self.Car[:,:,i]
         self.A[6:9,3:6,i]   = np.eye(3) 
         self.A[6:9,6:9,i]   = -R3_so3(self.wr_r[:,i]) 
 
         # self.B[5,0,i] = 1/self.mb 
         self.B[3:6, 0:3,i] = np.eye(3)/self.mb
         self.B[0:3, 3:6,i]  = np.eye(3)  
-        self.B[3:6, 3:6,i]  = self.Car[:,:,i].T@R3_so3(self.va_r[:,i])@self.Car[:,:,i]
+        self.B[3:6, 3:6,i]  = - R3_so3(self.va_r[:,i])
         if self.n == 12:
             self.A[9:12,3:6,i]  = np.eye(3) 
             self.A[9:12,6:9,i]  = self.c1*np.eye(3) 
@@ -241,23 +262,33 @@ class MPC_fixed_wing():
         H_sparse = csc_matrix(H)
         # Compute G
 
-        G = 2 * Bqp.T @ Q_hat @ Aqp @ self.d_Xi[:,i]
+        G = 2 * Bqp.T @ Q_hat @ Aqp_sparse @ self.d_Xi[:,i]
         # Define the quadratic objective function: 0.5 * U^T H U + G^T U
         # Define bounds for each control input
-        constraints = ()
+        f_max = 50
+        U_min = np.array([-f_max, -f_max, -f_max, -np.pi, -np.pi, -np.pi])
+        U_min = np.tile(U_min, self.Nh)
+        U_max = np.array([f_max, f_max, f_max, np.pi, np.pi, np.pi])
+        U_max = np.tile(U_max, self.Nh)
+        bounds = [(U_min[i], U_max[i]) for i in range(len(U_min))]
+        constraints = [
+        {'type': 'ineq', 'fun': lambda U: U - U_min},  # U >= 0
+        {'type': 'ineq', 'fun': lambda U: U_max - U},  # U <= 10
+            ]
         # Define the quadratic objective function: 0.5 * U^T H U + G^T U
         def objective(U):
-            return 0.5 * U.T @ H @ U + G.T @ U
+            return 0.5 * U.T @ H_sparse @ U + G.T @ U
         U0 = np.zeros(H.shape[0])
 
-        res = minimize(objective, U0, method='trust-constr', constraints=constraints,
+        res = minimize(objective, U0, method='trust-constr', constraints=[],
                options={'gtol': 1e-4, 'xtol': 1e-4, 'maxiter': 200, 'disp': False})
-        
-        # Extract solution
+        # res =minimize(objective, U0, method='SLSQP', bounds=bounds, options={'disp': False, 'maxiter': 200})
         U_h = res.x
 
         # Extract first 4 elements for dU
         dU = U_h[:self.m]
+
+        # dU = U0[:self.m]
 
         return dU
     
@@ -268,9 +299,9 @@ class MPC_fixed_wing():
         self.fixed_wing.x[0:3] = self.wr_r[:,i]
         self.fixed_wing.x[6:9] = self.ra_r[:,i]
 
-        va_body = self.Car[:,:,i].T@self.va_r[:,i]
+        # va_body = self.Car[:,:,i].T@self.va_r[:,i]
 
-        self.fixed_wing.x[3:6] = va_body
+        self.fixed_wing.x[3:6] = self.va_r[:,i]
         self.fixed_wing.R = self.Car[:,:,i]
         self.Cab[:,:,i] = self.fixed_wing.R
         self.dC[:,:,i] = self.Cab[:,:,i].T@self.Car[:,:,i]
@@ -295,26 +326,29 @@ class MPC_fixed_wing():
         if self.n == 12: 
             self.d_Xi[9:12,i] = self.c1*self.d_Xi[6:9,i] + self.d_Xi[3:6,i] 
 
+        self.dU[:,i] = self.mpc_outputs(i)
         self.abs_phi[0,i] =np.linalg.norm(self.d_Xi[0:3,i]) 
         self.abs_r[0,i] =  np.linalg.norm(self.X[6:9,i]-self.ra_r[:,i]) 
         self.abs_v[0,i] =  np.linalg.norm(self.X[3:6,i] - self.va_r[:,i]) 
         self.abs_f[0,i] = np.linalg.norm(self.dU[0:3,i]) 
         self.abs_w[0,i] =np.linalg.norm(self.dU[3:6,i]) 
-
-        self.dU[:,i] = self.mpc_outputs(i)
         #state constraints
         # self.f_min, self.tau_min = self.fixed_wing._forces_min(self.Car[:,:,i])
         # self.f_max, self.tau_max = self.fixed_wing._forces_max(self.Car[:,:,i])
-        self.f[:,i] = self.f_r[:,i] - self.dU[0:3,i]
-        # self.f[:,i] = np.clip(self.f[:,i],self.f_min,self.f_max)
+        self.f[:,i] = self.dC[:,:,i]@self.f_r[:,i] - self.dU[0:3,i]
+        self.f_r_body[:,i] = self.dC[:,:,i]@self.f_r[:,i]
         
         self.wb_b_cont[:,i] = self.dC[:,:,i]@self.wr_r[:,i] - self.dU[3:6,i]
         self.wb_b_cont[:,i] = np.clip(self.wb_b_cont[:,i],-np.pi,np.pi)
-        self.dwb_b_cont[:,i] = (self.wb_b_cont[:,i] - self.wb_b_cont[:,i-1])/self.T
+        if self.noise:
+            self.f[:,i] = self.f[:,i]*np.random.normal(1,0.1,3)
+            self.wb_b_cont[:,i] = self.wb_b_cont[:,i]*np.random.normal(1,0.1,3)
+        if i > 2:
+            self.dwb_b_cont[:,i] = (self.wb_b_cont[:,i] - self.wb_b_cont[:,i-1])/self.T
         self.tau[:,i] = self.J@self.dwb_b_cont[:,i] + np.cross(self.wb_b_cont[:,i], self.J@self.wb_b_cont[:,i])
         # self.tau[:,i] = np.clip(self.tau[:,i],self.tau_min,self.tau_max)
         #self.wb_b_cont[:,i] = np.clip(self.wb_b_cont[:,i],-np.pi/3,np.pi/3)
-
+        # ic(i,'debug')
         x, Rot = self.fixed_wing.step(np.hstack((self.f[:,i],self.tau[:,i]))) 
 
         va_body = self.Car[:,:,i+1].T@self.va_r[:,i+1]
@@ -328,8 +362,7 @@ class MPC_fixed_wing():
         
         self.X[0:3,i+1] = x[0:3]
         self.X[6:9,i+1] = x[6:9]
-        v_inertial = self.Cab[:,:,i+1]@x[3:6]
-        self.X[3:6,i+1] = v_inertial
+        self.X[3:6,i+1] = x[3:6]
 
         #printing the next desired values           
 
@@ -352,6 +385,8 @@ class MPC_fixed_wing():
         # ax.set_box_aspect([1, 1, 1])  # Equal aspect ratio for all axes
         # ax.set_xlim(190,200)
         ax.legend()
+        if self.save:
+            plt.savefig(f"3D_plot_{self.id}.png")
         # plt.show()
             #would f_T be the same as f_T_r depending on what attitude I use?
     def plot_erros(self):
@@ -361,17 +396,23 @@ class MPC_fixed_wing():
         ax.plot(self.t[:-self.Nh],self.abs_r[0,:-self.Nh],label = "r error")
         ax.plot(self.t[:-self.Nh],self.abs_v[0,:-self.Nh],label = "v error")
         ax.plot(self.t[:-self.Nh],self.abs_w[0,:-self.Nh],label = "w error")
+        ax.plot(self.t[:-self.Nh],self.abs_f[0,:-self.Nh],label = "f error")
         ax.set_xlabel('time')
         ax.set_ylabel('error')
         ax.set_title("Agent " + self.id)
         ax.legend()
+        if self.save:
+            plt.savefig(f"error_plot_{self.id}.png")
         # plt.show()
     def plot_force_omega(self):
         fig = plt.figure()
         plt.subplot(2, 1, 1)
-        plt.plot(self.t[:-self.Nh],self.f[0,:-self.Nh],label = "f x")
-        plt.plot(self.t[:-self.Nh],self.f[1,:-self.Nh],label = "f y")
-        plt.plot(self.t[:-self.Nh],self.f[2,:-self.Nh],label = "f z")
+        plt.plot(self.t[:-self.Nh],self.f_r_body[0,:-self.Nh],label = "f_r x")
+        plt.plot(self.t[:-self.Nh],self.f[0,:-self.Nh],label = "f x", linestyle='dashed')
+        plt.plot(self.t[:-self.Nh],self.f_r_body[1,:-self.Nh],label = "f_r y")
+        plt.plot(self.t[:-self.Nh],self.f[1,:-self.Nh],label = "f y", linestyle='dashed')
+        plt.plot(self.t[:-self.Nh],self.f_r_body[2,:-self.Nh],label = "f_r z")
+        plt.plot(self.t[:-self.Nh],self.f[2,:-self.Nh],label = "f z", linestyle='dashed')
         plt.legend()
         plt.subplot(2, 1, 2)
         plt.plot(self.t[:-self.Nh],self.wb_b_cont[0,:-self.Nh],label = "omega x")
@@ -379,6 +420,8 @@ class MPC_fixed_wing():
         plt.plot(self.t[:-self.Nh],self.wb_b_cont[2,:-self.Nh],label = "omega z")
         plt.legend()
         plt.title("Agent " + self.id)
+        if self.save:
+            plt.savefig(f"force_omega_plot_{self.id}.png")
         # plt.show()
 
     def plot_acceleration(self):
@@ -395,6 +438,9 @@ class MPC_fixed_wing():
         plt.plot(self.t[:-self.Nh],self.va_r[1,:-self.Nh],label = "v_y")
         plt.plot(self.t[:-self.Nh],self.va_r[2,:-self.Nh],label = "v_z")
         plt.legend()
+        plt.title("Agent " + self.id)
+        if self.save:
+            plt.savefig(f"acceleration_plot_{self.id}.png")
         
         # plt.show()
     def plot_controls(self):
@@ -410,21 +456,25 @@ class MPC_fixed_wing():
         plt.plot(self.t[:-self.Nh],self.wr_r[1,:-self.Nh],label = "omega_q")
         plt.plot(self.t[:-self.Nh],self.wr_r[2,:-self.Nh],label = "omega_r")
         plt.legend()
+        if self.save:
+            plt.savefig(f"controls_plot_{self.id}.png")
         # plt.show()
 
     def plot_references(self):
         fig = plt.figure()
         plt.subplot(2, 1, 1)
         plt.title("Agent " + self.id)
-        plt.plot(self.t[:-self.Nh],self.f_r[0,:-self.Nh],label = "f_x")
-        plt.plot(self.t[:-self.Nh],self.f_r[1,:-self.Nh],label = "f_y")
-        plt.plot(self.t[:-self.Nh],self.f_r[2,:-self.Nh],label = "f_z")
+        plt.plot(self.t[:-self.Nh],self.f[0,:-self.Nh],label = "f_x")
+        plt.plot(self.t[:-self.Nh],self.f[1,:-self.Nh],label = "f_y")
+        plt.plot(self.t[:-self.Nh],self.f[2,:-self.Nh],label = "f_z")
         plt.legend()
         plt.subplot(2, 1, 2)
         plt.plot(self.t[:-self.Nh],self.wr_r[0,:-self.Nh],label = "omega_p")
         plt.plot(self.t[:-self.Nh],self.wr_r[1,:-self.Nh],label = "omega_q")
         plt.plot(self.t[:-self.Nh],self.wr_r[2,:-self.Nh],label = "omega_r")
         plt.legend()
+        if self.save:
+            plt.savefig(f"references_plot_{self.id}.png")
 
     def plot_velocity(self):
         fig = plt.figure()
@@ -441,6 +491,8 @@ class MPC_fixed_wing():
         plt.plot(self.t[1:-self.Nh],self.X[5,1:-self.Nh],label = "w")
         plt.plot(self.t[1:-self.Nh],self.va_r[2,1:-self.Nh],label = "w_r")
         plt.legend()
+        if self.save:
+            plt.savefig(f"velocity_plot_{self.id}.png")
 
     def plot_velocity_body(self):
         fig = plt.figure()
@@ -454,6 +506,8 @@ class MPC_fixed_wing():
         plt.subplot(3, 1, 3)
         plt.plot(self.t[1:-self.Nh],self.va_r_body[2,1:-self.Nh],label = "w_r")
         plt.legend()
+        if self.save:
+            plt.savefig(f"velocity_body_plot_{self.id}.png")
         # plt.show()
     def plot_angles(self):
         fig = plt.figure()
@@ -470,6 +524,8 @@ class MPC_fixed_wing():
         plt.plot(self.t[:-self.Nh],np.rad2deg(self.angels[2,:-self.Nh]),label = "psi")
         plt.plot(self.t[:-self.Nh],np.rad2deg(self.des_angles[2,:-self.Nh]),label = "psi_r")
         plt.legend()
+        if self.save:
+            plt.savefig(f"angles_plot_{self.id}.png")
 
     def plot_positions(self):
         fig = plt.figure()
@@ -486,6 +542,8 @@ class MPC_fixed_wing():
         plt.plot(self.t[:-self.Nh],self.X[8,:-self.Nh],label = "z")
         plt.plot(self.t[:-self.Nh],self.ra_r[2,:-self.Nh],label = "z_r")
         plt.legend()
+        if self.save:
+            plt.savefig(f"positions_plot_{self.id}.png")
 
     def plot_error_position(self):
         fig = plt.figure()
@@ -499,6 +557,8 @@ class MPC_fixed_wing():
         plt.subplot(3, 1, 3)
         plt.plot(self.t[:-self.Nh],self.X[8,:-self.Nh]-self.ra_r[2,:-self.Nh],label = "z")
         plt.legend()
+        if self.save:
+            plt.savefig(f"error_position_plot_{self.id}.png")
 
     def plot_error_velocity(self):
         fig = plt.figure()
@@ -512,6 +572,9 @@ class MPC_fixed_wing():
         plt.subplot(3, 1, 3)
         plt.plot(self.t[:-self.Nh],self.X[5,:-self.Nh]-self.va_r[2,:-self.Nh],label = "w")
         plt.legend()
+        if self.save:
+            plt.savefig(f"error_velocity_plot_{self.id}.png")
+
 
     def save_to_csv(self):
         # Save va_body to a CSV file
