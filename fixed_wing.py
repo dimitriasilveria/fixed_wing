@@ -98,7 +98,7 @@ class FixedWing():
 
     def _f(self,t,x, inputs):
         w = x[0:3]
-        v_b = self.R.T@x[3:6]
+        v_b = x[3:6]
         f = inputs[0:3]
         tau = inputs[3:6]
         dv_dt = self._v_dot(v_b, w, f)

@@ -36,7 +36,7 @@ class Embedding():
         self.z = np.zeros(self.n)
 
        
-    def targets(self, agent_r, agent_v, correct):
+    def targets(self, agent_r, agent_v, phi_prev,correct):
         target_r = np.zeros((3, self.n))
         target_v = np.zeros((3, self.n))
         target_a = np.zeros((3, self.n))
@@ -61,6 +61,11 @@ class Embedding():
 
 
             pos = np.array([agent_r[0, i] , agent_r[1, i] , agent_r[2, i]-self.z[i]])
+            phi_i = phi_prev[i]
+            phi_dot_x = self.calc_wx(phi_i)#*(phi_d-self.phi_des[i])
+            phi_dot_y = self.calc_wy(phi_i) #phi_i-phi_prev[i]*
+            v_d_hat_x_y = np.array([phi_dot_x, phi_dot_y, 0])
+            self.Rot_des[:,:,i] = expm(R3_so3(v_d_hat_x_y))
 
             pos_rot = self.Rot_des[:,:,i].T@pos.T
             phi, _ = self.cart2pol(pos)
@@ -151,7 +156,7 @@ class Embedding():
                 k += 1
         
         
-        return  self.phi_cur,target_r, target_v, target_a, phi_diff, distances
+        return  self.phi_des,target_r, target_v, target_a, phi_diff, distances
     
 
     def calc_wx(self,phi):

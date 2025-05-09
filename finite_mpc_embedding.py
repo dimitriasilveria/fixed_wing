@@ -17,7 +17,9 @@ import os
 from icecream import ic
 import csv
 from scipy.sparse import csc_matrix
-from scipy.optimize import minimize
+from cvxpy import psd_wrap
+from scipy.optimize import minimize, Bounds
+import cvxpy as cp
 from scipy.linalg import block_diag
 
 #Initiating constants##############################################
@@ -28,7 +30,7 @@ class MPC_fixed_wing():
         self.noise = noise
         self.save = save
         self.fixed_wing = FixedWing("/home/dimitria/fixed_wing/pyfly/pyfly/pyfly_config.json", "/home/dimitria/fixed_wing/pyfly/pyfly/x8_param.mat")
-        self.n = 9
+        self.n = 12
         self.m = 6
         self.qsi = np.zeros((self.n,1)) 
         self.n_agents = 4
@@ -73,13 +75,19 @@ class MPC_fixed_wing():
         self.va_r_body = np.zeros((3,self.N))
         # p = np.array([-5,-2.5, -1.1,-2.3,-0.5,-1.5,-2.2,-3.1,-2])
         # p = np.array([-5,-2.5, -10.1,-2.3,-0.5,-1.5,-2.2,-3.1,-2,-6.5,-3.4,-8])
-        self.Nh = 3
+        self.Nh = 10
         self.Q_v = 10**(3)*np.eye(3)
-        self.Q_r = 1e6*np.eye(3)
-        self.Q_phi =1e1*np.eye(3)
+        self.Q_r = 1e7*np.eye(3)
+        self.Q_phi =1e7*np.eye(3)
         self.Q_aug = 1e1*np.eye(3)
-        self.Q_f = 1e1
-        self.Q_w = 1e1
+        self.Q_f = 1e2
+        self.Q_w = 1e4
+        # self.Q_v = 10**(5)*np.eye(3)
+        # self.Q_r = 1e9*np.eye(3)
+        # self.Q_phi =1e2*np.eye(3)
+        # self.Q_aug = 1e1*np.eye(3)
+        # self.Q_f = 1e5
+        # self.Q_w = 10**(5)
         self.Q_i = np.eye(self.n)
         if self.n == 12:
             self.Q_i[0:12,0:12] = block_diag(self.Q_phi, self.Q_v, self.Q_r, self.Q_aug)
@@ -123,9 +131,11 @@ class MPC_fixed_wing():
             
     def references(self,i, ra_r, va_r, va_r_dot):
         self.ra_r[:,i] = ra_r
-        if i >=1:
-            self.va_r[:,i] = (self.ra_r[:,i]-self.ra_r[:,i-1])/self.T
-            self.va_r_dot[:,i] = (self.va_r[:,i]-self.va_r[:,i-1])/self.T
+        self.va_r[:,i] = va_r
+        self.va_r_dot[:,i] = va_r_dot
+        # if i >=1:
+        #     self.va_r[:,i] = (self.ra_r[:,i]-self.ra_r[:,i-1])/self.T
+        #     self.va_r_dot[:,i] = (self.va_r[:,i]-self.va_r[:,i-1])/self.T
         # else:
         #     self.va_r[:,i] = va_r
         #     self.va_r_dot[:,i] = va_r_dot
@@ -147,7 +157,7 @@ class MPC_fixed_wing():
         else:
             psi = np.arctan2(v_norm[1],v_norm[0])
             theta = -np.arcsin(self.va_r[2,i]/norm_v)
-        phi = np.arctan2(-norm_v**2*np.cos(theta),self.r*self.g)
+        phi = np.arctan2(norm_v**2*np.cos(theta),self.r*self.g)
 
 
         if i == 2:
@@ -216,7 +226,7 @@ class MPC_fixed_wing():
     def calc_A_and_B(self,i):
         self.A[:,:,i]   = np.zeros((self.n,self.n))
         self.B[:,:,i]   = np.zeros((self.n,self.m))
-        self.A[3:6,0:3,i]   = R3_so3(self.wr_r[:,i])@R3_so3(self.va_r[:,i])# - R3_so3(self.f_r[:,i])
+        self.A[3:6,0:3,i]   = R3_so3(self.wr_r[:,i])@R3_so3(self.va_r[:,i]) - R3_so3(self.f_r[:,i])/self.mb
         self.A[3:6,3:6,i]   = R3_so3(self.wr_r[:,i])- R3_so3(self.wr_r[:,i])@self.Car[:,:,i]
         self.A[6:9,3:6,i]   = np.eye(3) 
         self.A[6:9,6:9,i]   = -R3_so3(self.wr_r[:,i]) 
@@ -224,7 +234,7 @@ class MPC_fixed_wing():
         # self.B[5,0,i] = 1/self.mb 
         self.B[3:6, 0:3,i] = np.eye(3)/self.mb
         self.B[0:3, 3:6,i]  = np.eye(3)  
-        self.B[3:6, 3:6,i]  = - R3_so3(self.va_r[:,i])
+        self.B[3:6, 3:6,i]  = R3_so3(self.va_r[:,i])
         if self.n == 12:
             self.A[9:12,3:6,i]  = np.eye(3) 
             self.A[9:12,6:9,i]  = self.c1*np.eye(3) 
@@ -265,28 +275,58 @@ class MPC_fixed_wing():
         G = 2 * Bqp.T @ Q_hat @ Aqp_sparse @ self.d_Xi[:,i]
         # Define the quadratic objective function: 0.5 * U^T H U + G^T U
         # Define bounds for each control input
-        f_max = 50
-        U_min = np.array([-f_max, -f_max, -f_max, -np.pi, -np.pi, -np.pi])
-        U_min = np.tile(U_min, self.Nh)
-        U_max = np.array([f_max, f_max, f_max, np.pi, np.pi, np.pi])
-        U_max = np.tile(U_max, self.Nh)
-        bounds = [(U_min[i], U_max[i]) for i in range(len(U_min))]
-        constraints = [
-        {'type': 'ineq', 'fun': lambda U: U - U_min},  # U >= 0
-        {'type': 'ineq', 'fun': lambda U: U_max - U},  # U <= 10
-            ]
+        # U_min = np.array([-f_max, -f_max, -f_max, -np.pi, -np.pi, -np.pi])
+        # U_min = np.tile(U_min, self.Nh)
+        # U_max = np.array([f_max, f_max, f_max, np.pi, np.pi, np.pi])
+        # U_max = np.tile(U_max, self.Nh)
+            # bounds = [(U_min[i], U_max[i]) for i in range(len(U_min))]
+        f_max = 200
+        u_min_single = np.array([-f_max, -f_max, -f_max, -np.pi, -np.pi, -np.pi])
+        u_max_single = np.array([f_max, f_max, f_max, np.pi, np.pi, np.pi])
+        U_min = np.tile(u_min_single, self.Nh)
+        U_max = np.tile(u_max_single, self.Nh)
+        bounds = Bounds(U_min, U_max)
+        def grad(U):
+            return H @ U + G
         # Define the quadratic objective function: 0.5 * U^T H U + G^T U
+        n = H.shape[0]
+        U = cp.Variable(n)
+        # constraints = [
+        #     U >= U_min,
+        #     U <= U_max
+
+        # ]
+        # constraints = [
+        # {'type': 'ineq', 'fun': lambda U: U - U_min},  # U >= 0
+        # {'type': 'ineq', 'fun': lambda U: U_max - U},  # U <= 10
+        #     ]
+
         def objective(U):
             return 0.5 * U.T @ H_sparse @ U + G.T @ U
-        U0 = np.zeros(H.shape[0])
-
-        res = minimize(objective, U0, method='trust-constr', constraints=[],
-               options={'gtol': 1e-4, 'xtol': 1e-4, 'maxiter': 200, 'disp': False})
-        # res =minimize(objective, U0, method='SLSQP', bounds=bounds, options={'disp': False, 'maxiter': 200})
+        # H += 1e-6 * np.eye(H.shape[0])
+        # objective = cp.Minimize(0.5 * cp.quad_form(U, psd_wrap(H)) + G.T @ U)
+        # prob = cp.Problem(objective, constraints)
+        U0 = np.ones(H.shape[0])
+        def hess(U):
+            return np.zeros((len(U), len(U)))
+        # res = minimize(objective, U0,hess=hess, method='trust-constr', constraints=constraints,
+        #        options={'gtol': 1e-4, 'xtol': 1e-4, 'maxiter': 200, 'disp': False})
+        # res = minimize(
+        #     fun=objective,
+        #     x0=U0,
+        #     jac=grad,
+        #     method='trust-constr',
+        #     bounds=bounds,
+        #     options={'gtol': 1e-4, 'xtol': 1e-4, 'maxiter': 200, 'disp': False}
+        # )
+        res =minimize(objective, U0, method='SLSQP', bounds=bounds, options={'disp': False, 'maxiter': 200, 'ftol': 1e-4})
         U_h = res.x
+        # prob.solve(solver=cp.ECOS, abstol=1e-5, reltol=1e-5, max_iters=3000, verbose=False)
+        # U_h = U.value
 
         # Extract first 4 elements for dU
         dU = U_h[:self.m]
+        # ic(dU)
 
         # dU = U0[:self.m]
 
@@ -301,11 +341,11 @@ class MPC_fixed_wing():
 
         # va_body = self.Car[:,:,i].T@self.va_r[:,i]
 
-        self.fixed_wing.x[3:6] = self.va_r[:,i]
+        self.fixed_wing.x[3:6] = self.Car[:,:,i].T@self.va_r[:,i]
         self.fixed_wing.R = self.Car[:,:,i]
         self.Cab[:,:,i] = self.fixed_wing.R
         self.dC[:,:,i] = self.Cab[:,:,i].T@self.Car[:,:,i]
-        self.d_v = self.Cab[:,:,i].T@(self.va_r[:,i] - self.X[3:6,i]) 
+        self.d_v = self.Cab[:,:,i].T@(self.va_r[:,i] - self.Car[:,:,i]@self.X[3:6,i]) 
         self.d_r = self.Cab[:,:,i].T@(self.ra_r[:,i] - self.X[6:9,i]) 
         self.d_Xi[0:9,i] = dX_to_dXi(self.dC[:,:,i],self.d_v,self.d_r)
         if self.n == 12: 
@@ -317,7 +357,7 @@ class MPC_fixed_wing():
         # self.references(i,ra_r, va_r, va_r_dot)
         
         # self.calc_K_pid(i)
-
+        # self.fixed_wing.x[3:6] = self.Car[:,:,i].T@self.va_r[:,i]
         self.dC[:,:,i] = self.Cab[:,:,i].T@self.Car[:,:,i]
         # self.dC[:,:,i+1] = self.Cab[:,:,i+1].T@self.Car[:,:,i+1]
         self.d_v = self.Cab[:,:,i].T@(self.va_r[:,i] - self.X[3:6,i]) 
@@ -336,6 +376,7 @@ class MPC_fixed_wing():
         # self.f_min, self.tau_min = self.fixed_wing._forces_min(self.Car[:,:,i])
         # self.f_max, self.tau_max = self.fixed_wing._forces_max(self.Car[:,:,i])
         self.f[:,i] = self.dC[:,:,i]@self.f_r[:,i] - self.dU[0:3,i]
+        # self.f[:,i] = self.f_r[:,i] - self.dU[0:3,i]
         self.f_r_body[:,i] = self.dC[:,:,i]@self.f_r[:,i]
         
         self.wb_b_cont[:,i] = self.dC[:,:,i]@self.wr_r[:,i] - self.dU[3:6,i]
@@ -362,7 +403,7 @@ class MPC_fixed_wing():
         
         self.X[0:3,i+1] = x[0:3]
         self.X[6:9,i+1] = x[6:9]
-        self.X[3:6,i+1] = x[3:6]
+        self.X[3:6,i+1] = self.Cab[:,:,i+1]@x[3:6]
 
         #printing the next desired values           
 
@@ -372,8 +413,8 @@ class MPC_fixed_wing():
     def plot_3D(self):
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
-        ax.plot(self.X[6,:-self.Nh],self.X[7,:-self.Nh],self.X[8,:-self.Nh],label = "real trajectory")
-        ax.plot(self.ra_r[0,:-self.Nh],self.ra_r[1,:-self.Nh],self.ra_r[2,:-self.Nh],label = "reference trajectory")
+        ax.plot(self.X[6,:-self.Nh],self.X[7,:-self.Nh],self.X[8,:-self.Nh],label = "real traj")
+        ax.plot(self.ra_r[0,:-self.Nh],self.ra_r[1,:-self.Nh],self.ra_r[2,:-self.Nh],label = "ref. traj")
         ax.set_xlabel('X Label')
         ax.set_ylabel('Y Label')
         ax.set_zlabel('Z Label')
@@ -386,7 +427,7 @@ class MPC_fixed_wing():
         # ax.set_xlim(190,200)
         ax.legend()
         if self.save:
-            plt.savefig(f"3D_plot_{self.id}.png")
+            plt.savefig(f"3D_plot_{self.id}_fixed_wing.png")
         # plt.show()
             #would f_T be the same as f_T_r depending on what attitude I use?
     def plot_erros(self):
