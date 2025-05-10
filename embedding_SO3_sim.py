@@ -13,7 +13,7 @@ class Embedding():
         self.k_phi = k_phi
         self.tactic = tactic
         self.n = n_agents
-        self.dt = dt
+        self.dt = 10*dt
         self.Rot_des = np.zeros((3,3,self.n))
         self.Rot_act = np.zeros((3,3,self.n))
         if (self.tactic == 'circle') or (self.tactic == 'spiral'):

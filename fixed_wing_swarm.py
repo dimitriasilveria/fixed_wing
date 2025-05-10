@@ -15,7 +15,7 @@ r = 10
 T_p = 10
 phi_dot = 2*np.pi/T_p
 ic(phi_dot)
-t_max = 3
+t_max = 1
 
 t_min = 0
 k_phi = 1
@@ -84,9 +84,9 @@ for i in range(2,N-Nh):
                 controllers[k].set_initial_conditions(2)
         # ic(controllers[k].va_r_dot_body[:,i], controllers[k].wr_r[:,i],controllers[k].va_r_body[:,i],controllers[k].f_r[:,i],controllers[k].tau_r[:,i], controllers[k].d_wr_r[:,i])
             controllers[k].control(i, target_r[:,k], target_v[:,k], target_a[:,k])
-    pos_real = target_r#controllers[k].X[6:9,i].reshape(-1,1)#
-    # vel_real = controllers[k].X[3:6,i].reshape(-1,1)
-    vel_real = target_v
+    pos_real = controllers[k].X[6:9,i].reshape(-1,1)#target_r#
+    vel_real = controllers[k].X[3:6,i].reshape(-1,1)
+    # vel_real = target_v
 
 for i in range(n_agents):
     controllers[i].plot_angles()
