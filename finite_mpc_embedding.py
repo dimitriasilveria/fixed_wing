@@ -11,8 +11,8 @@ from scipy.spatial.transform import Rotation as R
 from scipy.linalg import expm, logm
 import matplotlib.pyplot as plt 
 from mpl_toolkits.mplot3d import Axes3D
-# import matplotlib as mpl
-# mpl.rcParams['text.usetex'] = True
+import matplotlib as mpl
+mpl.rcParams['text.usetex'] = True
 import os
 from icecream import ic
 import csv
@@ -24,16 +24,16 @@ from scipy.linalg import block_diag
 
 #Initiating constants##############################################
 class MPC_fixed_wing():
-    def __init__(self,t_max, t_min, r, T_p, id, noise = False, save = False):
+    def __init__(self,t_max, t_min, r, T_p, id, figures_path, noise = False, save = False):
         #fixed wing model
         self.id = id
         self.noise = noise
         self.save = save
+        self.figures_path = figures_path
         self.fixed_wing = FixedWing("/home/dimitria/fixed_wing/pyfly/pyfly/pyfly_config.json", "/home/dimitria/fixed_wing/pyfly/pyfly/x8_param.mat")
         self.n = 12
         self.m = 6
         self.qsi = np.zeros((self.n,1)) 
-        self.n_agents = 4
         self.mb = self.fixed_wing.mb
         self.g = self.fixed_wing.g
         self.J = self.fixed_wing.J
@@ -75,7 +75,7 @@ class MPC_fixed_wing():
         self.va_r_body = np.zeros((3,self.N))
         # p = np.array([-5,-2.5, -1.1,-2.3,-0.5,-1.5,-2.2,-3.1,-2])
         # p = np.array([-5,-2.5, -10.1,-2.3,-0.5,-1.5,-2.2,-3.1,-2,-6.5,-3.4,-8])
-        self.Nh = 10
+        self.Nh = 5
         self.Q_v = 10**(3)*np.eye(3)
         self.Q_r = 1e7*np.eye(3)
         self.Q_phi =1e7*np.eye(3)
@@ -194,7 +194,7 @@ class MPC_fixed_wing():
         if i > 1 :
 
             mat= self.Car[:,:,i].T@self.Car[:,:,i+1]
-            self.wr_r[:,i] = so3_R3(logm(mat))/self.T
+            self.wr_r[:,i] = so3_R3(logm(mat))/(1*self.T)
             
             
             # self.wr_r[:,i] = np.clip(self.wr_r[:,i],-np.pi,np.pi)
@@ -209,7 +209,7 @@ class MPC_fixed_wing():
             # self.f_r[:,i] = self.mb*(self.va_r_dot[:,i] - self.g*self.z_w  + np.cross(wr_r_inertial,self.va_r[:,i]))
             self.f_r[:,i] = self.mb*(a_body + np.cross(self.wr_r[:,i],self.va_r_body[:,i])) 
             if i > 2 :
-                self.d_wr_r[:,i] = (self.wr_r[:,i] - self.wr_r[:,i-1])/self.T
+                self.d_wr_r[:,i] = (self.wr_r[:,i] - self.wr_r[:,i-1])/(1*self.T)
             self.tau_r[:,i] = self.J@self.d_wr_r[:,i] + np.cross(self.wr_r[:,i], self.J@self.wr_r[:,i])
 
         else:
@@ -226,7 +226,7 @@ class MPC_fixed_wing():
     def calc_A_and_B(self,i):
         self.A[:,:,i]   = np.zeros((self.n,self.n))
         self.B[:,:,i]   = np.zeros((self.n,self.m))
-        self.A[3:6,0:3,i]   = R3_so3(self.wr_r[:,i])@R3_so3(self.va_r[:,i]) - R3_so3(self.f_r[:,i])/self.mb
+        self.A[3:6,0:3,i]   = R3_so3(self.wr_r[:,i])@R3_so3(self.va_r[:,i]) #- R3_so3(self.f_r[:,i])/self.mb
         self.A[3:6,3:6,i]   = R3_so3(self.wr_r[:,i])- R3_so3(self.wr_r[:,i])@self.Car[:,:,i]
         self.A[6:9,3:6,i]   = np.eye(3) 
         self.A[6:9,6:9,i]   = -R3_so3(self.wr_r[:,i]) 
@@ -280,7 +280,7 @@ class MPC_fixed_wing():
         # U_max = np.array([f_max, f_max, f_max, np.pi, np.pi, np.pi])
         # U_max = np.tile(U_max, self.Nh)
             # bounds = [(U_min[i], U_max[i]) for i in range(len(U_min))]
-        f_max = 200
+        f_max = np.inf
         u_min_single = np.array([-f_max, -f_max, -f_max, -np.pi, -np.pi, -np.pi])
         u_max_single = np.array([f_max, f_max, f_max, np.pi, np.pi, np.pi])
         U_min = np.tile(u_min_single, self.Nh)
@@ -398,7 +398,7 @@ class MPC_fixed_wing():
         #updating the states
         self.Cab[:,:,i+1] = Rot
         phi, theta, psi = R.from_matrix(self.Cab[:,:,i]).as_euler('xyz', degrees=False)
-        self.angels[:,i] = np.array([phi,theta,psi])  #
+        self.angels[:,i+1] = np.array([phi,theta,psi])  #
         
         
         self.X[0:3,i+1] = x[0:3]
@@ -413,11 +413,15 @@ class MPC_fixed_wing():
     def plot_3D(self):
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
-        ax.plot(self.X[6,:-self.Nh],self.X[7,:-self.Nh],self.X[8,:-self.Nh],label = "real traj")
-        ax.plot(self.ra_r[0,:-self.Nh],self.ra_r[1,:-self.Nh],self.ra_r[2,:-self.Nh],label = "ref. traj")
-        ax.set_xlabel('X Label')
-        ax.set_ylabel('Y Label')
-        ax.set_zlabel('Z Label')
+        ax.plot(self.X[6,:-self.Nh],self.X[7,:-self.Nh],self.X[8,:-self.Nh],label = "real traj.",color = 'black')
+        ax.plot(self.X[6,:-self.Nh],self.X[7,:-self.Nh],2*np.ones_like(self.X[7,:-self.Nh]),label = "XY proj.", color = 'red')
+        ax.plot((-self.r - 2)*np.ones_like(self.X[7,:-self.Nh]), self.X[7,:-self.Nh],self.X[8,:-self.Nh],label = "YZ proj.",color = 'red')
+
+        ax.plot(self.ra_r[0,:-self.Nh],self.ra_r[1,:-self.Nh],self.ra_r[2,:-self.Nh],label = "ref. traj.",linestyle='dashed', color = "blue")
+        
+        ax.set_xlabel('X (m)')
+        ax.set_ylabel('Y (m)')
+        ax.set_zlabel('Z (m)')
         ax.set_title("Agent " + self.id)
         # ax.set_zlim(-1,0.1)
         # ax.set_ylim(0, 5)
@@ -427,23 +431,33 @@ class MPC_fixed_wing():
         # ax.set_xlim(190,200)
         ax.legend()
         if self.save:
-            plt.savefig(f"3D_plot_{self.id}_fixed_wing.png")
+            plt.savefig(f"{self.figures_path}/3D_plot_{self.id}_fixed_wing.png")
         # plt.show()
             #would f_T be the same as f_T_r depending on what attitude I use?
     def plot_erros(self):
         fig = plt.figure()
-        ax = fig.add_subplot(111)
-        ax.plot(self.t[:-self.Nh],self.abs_phi[0,:-self.Nh],label = "phi error")
-        ax.plot(self.t[:-self.Nh],self.abs_r[0,:-self.Nh],label = "r error")
-        ax.plot(self.t[:-self.Nh],self.abs_v[0,:-self.Nh],label = "v error")
-        ax.plot(self.t[:-self.Nh],self.abs_w[0,:-self.Nh],label = "w error")
-        ax.plot(self.t[:-self.Nh],self.abs_f[0,:-self.Nh],label = "f error")
-        ax.set_xlabel('time')
-        ax.set_ylabel('error')
-        ax.set_title("Agent " + self.id)
-        ax.legend()
+        plt.subplot(3, 1, 1)
+        plt.plot(self.t[:-self.Nh],np.rad2deg(self.abs_phi[0,:-self.Nh]) , color = "blue")
+        plt.ylabel(r"$\|\delta\theta\ \mathrm{(degrees)}\|$")
+
+        plt.title("Agent " + self.id)
+        plt.grid()
+        plt.subplot(3, 1, 2)
+        plt.plot(self.t[:-self.Nh],self.abs_v[0,:-self.Nh], color = "blue")
+        plt.ylabel("$||\delta v (m/s)||$")
+        plt.grid()
+        plt.subplot(3, 1, 3)
+        plt.plot(self.t[:-self.Nh],self.abs_r[0,:-self.Nh], color = "blue")
+        plt.ylabel("$||\delta p (m)||$")
+        plt.grid()
+        # plt.plot(self.t[:-self.Nh],self.abs_w[0,:-self.Nh],label = "w error")
+        # plt.plot(self.t[:-self.Nh],self.abs_f[0,:-self.Nh],label = "f error")
+        plt.xlabel('t (s)')
+        
+        
+        # plt.legend()
         if self.save:
-            plt.savefig(f"error_plot_{self.id}.png")
+            plt.savefig(f"{self.figures_path}/error_plot_{self.id}.png")
         # plt.show()
     def plot_force_omega(self):
         fig = plt.figure()
@@ -462,7 +476,7 @@ class MPC_fixed_wing():
         plt.legend()
         plt.title("Agent " + self.id)
         if self.save:
-            plt.savefig(f"force_omega_plot_{self.id}.png")
+            plt.savefig(f"{self.figures_path}/force_omega_plot_{self.id}.png")
         # plt.show()
 
     def plot_acceleration(self):
@@ -481,7 +495,7 @@ class MPC_fixed_wing():
         plt.legend()
         plt.title("Agent " + self.id)
         if self.save:
-            plt.savefig(f"acceleration_plot_{self.id}.png")
+            plt.savefig(f"{self.figures_path}/acceleration_plot_{self.id}.png")
         
         # plt.show()
     def plot_controls(self):
@@ -498,7 +512,7 @@ class MPC_fixed_wing():
         plt.plot(self.t[:-self.Nh],self.wr_r[2,:-self.Nh],label = "omega_r")
         plt.legend()
         if self.save:
-            plt.savefig(f"controls_plot_{self.id}.png")
+            plt.savefig(f"{self.figures_path}/controls_plot_{self.id}.png")
         # plt.show()
 
     def plot_references(self):
@@ -515,7 +529,7 @@ class MPC_fixed_wing():
         plt.plot(self.t[:-self.Nh],self.wr_r[2,:-self.Nh],label = "omega_r")
         plt.legend()
         if self.save:
-            plt.savefig(f"references_plot_{self.id}.png")
+            plt.savefig(f"{self.figures_path}/references_plot_{self.id}.png")
 
     def plot_velocity(self):
         fig = plt.figure()
@@ -533,7 +547,8 @@ class MPC_fixed_wing():
         plt.plot(self.t[1:-self.Nh],self.va_r[2,1:-self.Nh],label = "w_r")
         plt.legend()
         if self.save:
-            plt.savefig(f"velocity_plot_{self.id}.png")
+            plt.savefig(f"{self.figures_path}/velocity_plot_{self.id}.png")
+
 
     def plot_velocity_body(self):
         fig = plt.figure()
@@ -548,7 +563,7 @@ class MPC_fixed_wing():
         plt.plot(self.t[1:-self.Nh],self.va_r_body[2,1:-self.Nh],label = "w_r")
         plt.legend()
         if self.save:
-            plt.savefig(f"velocity_body_plot_{self.id}.png")
+            plt.savefig(f"{self.figures_path}/velocity_body_plot_{self.id}.png")
         # plt.show()
     def plot_angles(self):
         fig = plt.figure()
@@ -566,25 +581,32 @@ class MPC_fixed_wing():
         plt.plot(self.t[:-self.Nh],np.rad2deg(self.des_angles[2,:-self.Nh]),label = "psi_r")
         plt.legend()
         if self.save:
-            plt.savefig(f"angles_plot_{self.id}.png")
+            plt.savefig(f"{self.figures_path}/angles_plot_{self.id}.png")
 
     def plot_positions(self):
         fig = plt.figure()
         plt.subplot(3, 1, 1)
         plt.title("Agent " + self.id)
-        plt.plot(self.t[:-self.Nh],self.X[6,:-self.Nh],label = "x")
-        plt.plot(self.t[:-self.Nh],self.ra_r[0,:-self.Nh],label = "x_r")
+        plt.plot(self.t[:-self.Nh],self.X[6,:-self.Nh],label = "real", color = "blue")
+        plt.plot(self.t[:-self.Nh],self.ra_r[0,:-self.Nh],label = "ref.", linestyle='dashed', color = "blue")
+        plt.ylabel('X (m)')
+        plt.grid()
         plt.legend()
         plt.subplot(3, 1, 2)
-        plt.plot(self.t[:-self.Nh],self.X[7,:-self.Nh],label = "y")
-        plt.plot(self.t[:-self.Nh],self.ra_r[1,:-self.Nh],label = "y_r")
+        plt.plot(self.t[:-self.Nh],self.X[7,:-self.Nh],label = "real", color = "blue")
+        plt.plot(self.t[:-self.Nh],self.ra_r[1,:-self.Nh],label = "ref.", linestyle='dashed', color = "blue")
+        plt.ylabel("Y (m)")
+        plt.grid()
         plt.legend()
         plt.subplot(3, 1, 3)
-        plt.plot(self.t[:-self.Nh],self.X[8,:-self.Nh],label = "z")
-        plt.plot(self.t[:-self.Nh],self.ra_r[2,:-self.Nh],label = "z_r")
+        plt.plot(self.t[:-self.Nh],self.X[8,:-self.Nh],label = "real", color = "blue")
+        plt.plot(self.t[:-self.Nh],self.ra_r[2,:-self.Nh],label = "ref.", linestyle='dashed', color = "blue")
+        plt.ylabel("Z (m)")
+        plt.xlabel('t (s)')
         plt.legend()
+        plt.grid()
         if self.save:
-            plt.savefig(f"positions_plot_{self.id}.png")
+            plt.savefig(f"{self.figures_path}/positions_plot_{self.id}.png")
 
     def plot_error_position(self):
         fig = plt.figure()
@@ -599,7 +621,7 @@ class MPC_fixed_wing():
         plt.plot(self.t[:-self.Nh],self.X[8,:-self.Nh]-self.ra_r[2,:-self.Nh],label = "z")
         plt.legend()
         if self.save:
-            plt.savefig(f"error_position_plot_{self.id}.png")
+            plt.savefig(f"{self.figures_path}/error_position_plot_{self.id}.png")
 
     def plot_error_velocity(self):
         fig = plt.figure()
@@ -614,7 +636,7 @@ class MPC_fixed_wing():
         plt.plot(self.t[:-self.Nh],self.X[5,:-self.Nh]-self.va_r[2,:-self.Nh],label = "w")
         plt.legend()
         if self.save:
-            plt.savefig(f"error_velocity_plot_{self.id}.png")
+            plt.savefig(f"{self.figures_path}/error_velocity_plot_{self.id}.png")
 
 
     def save_to_csv(self):

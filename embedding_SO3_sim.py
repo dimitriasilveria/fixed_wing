@@ -20,7 +20,7 @@ class Embedding():
             self.scale = 0 #scale the distortion around the x axis
         else:
             self.scale = 0.5
-        self.hover_height = 2*r
+        self.hover_height = r
         self.count = 0
         for i in range(self.n):
             self.Rot_des[:,:,i] = np.eye(3)
@@ -58,7 +58,6 @@ class Embedding():
                 self.z[i] = self.hover_height*self.t[i]
             else:
                 self.z[i] = self.hover_height
-
 
             pos = np.array([agent_r[0, i] , agent_r[1, i] , agent_r[2, i]-self.z[i]])
             phi_i = phi_prev[i]
@@ -149,11 +148,12 @@ class Embedding():
         if self.n == 2:
             distances[0] = np.linalg.norm(target_r[:, 0] - target_r[:, 1])
             phi_diff[0] = np.abs(self.phi_cur[0] - self.phi_cur[1])
-        for i in range(self.n):
-            for j in range(i+1, self.n):
-                distances[k] = np.linalg.norm(target_r[:, i] - target_r[:, j])
-                phi_diff[k] = np.arccos(np.dot(unit[i,:],unit[j,:]))
-                k += 1
+        else:
+            for i in range(self.n):
+                for j in range(i+1, self.n):
+                    distances[k] = np.linalg.norm(agent_r[:, i] - agent_r[:, j])
+                    phi_diff[k] = np.arccos(np.dot(unit[i,:],unit[j,:]))
+                    k += 1
         
         
         return  self.phi_des,target_r, target_v, target_a, phi_diff, distances
@@ -184,7 +184,7 @@ class Embedding():
         phi_dot_des = self.phi_dot +  k*(1/(w_diff_ji.real) + 1/(w_diff_ki.real)) # 0.1*(w_neg.real + w_pos.real) #+ np.clip(-0.5/(w_diff_ij.real) + 0.5/(w_diff_ki.real),-0.5,0.5)
 
 
-        return np.clip(phi_dot_des,0.1,0.5)
+        return np.clip(phi_dot_des,0.2,1.5)
 
 
     def cart2pol(self,pos_rot):
