@@ -8,7 +8,10 @@ from icecream import ic
 import random
 import matplotlib as mpl
 mpl.rcParams['text.usetex'] = False
-
+plt.rcParams.update({
+    # 'font.family': 'Times New Roman',
+    'font.size': 13
+})
 
 figures_path = "/home/dimitria/fixed_wing/figures"
 r = 10
@@ -23,7 +26,7 @@ tactic = '' #circle, spiral, line
 n_agents = 3
 controllers = []
 for i in range(n_agents):
-    controllers.append(MPC_fixed_wing(t_max, t_min, r, T_p, str(i+1),figures_path, noise = True, save = False))
+    controllers.append(MPC_fixed_wing(t_max, t_min, r, T_p, str(i+1),figures_path, noise = True, save = True))
 Nh = controllers[0].Nh
 dt = controllers[0].T
 embedding = Embedding(r,phi_dot,k_phi,tactic,n_agents,dt)
@@ -54,7 +57,7 @@ for i in range(n_agents):
     controllers[i].references(0,target_r[:,i], target_v[:,i], target_a[:,i])
     controllers[i].set_initial_conditions(0)
 
-phi,target_r, target_v, target_a, phi_diff_new, dist = embedding.targets(target_r,target_v,phi,False)
+phi,target_r, target_v, target_a, phi_diff_new, dist = embedding.targets(target_r,target_v,phi,True)
 phi_diff[:,1] = phi_diff_new
 distances[:,1] = dist
 
@@ -112,7 +115,7 @@ fig = plt.figure(constrained_layout=True)
 plt.plot(np.rad2deg(phi_diff[0,:-Nh]), label='1-2',color='red')
 plt.plot(np.rad2deg(phi_diff[1,:-Nh]), label='1-3',color='blue')
 plt.plot(np.rad2deg(phi_diff[2,:-Nh]), label='2-3',color='black')
-plt.title('Angular separation between agents ')
+plt.title('Angular Separation Between the Agents ')
 plt.xlabel('t (s)')
 plt.ylabel('$\phi_{diff}$ (degrees)')
 plt.legend()
@@ -125,7 +128,7 @@ fig = plt.figure(constrained_layout=True)
 plt.plot(distances[0,:-Nh], label='1-2',color='red')
 plt.plot(distances[1,:-Nh], label='1-3',color='blue')
 plt.plot(distances[2,:-Nh], label='2-3',color='black')
-plt.title("Distance between agents")
+plt.title("Distance Between the Agents")
 plt.xlabel('t (s)')
 plt.ylabel('Distance (m)')
 plt.legend()

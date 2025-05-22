@@ -12,7 +12,7 @@ from scipy.linalg import expm, logm
 import matplotlib.pyplot as plt 
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib as mpl
-mpl.rcParams['text.usetex'] = True
+mpl.rcParams['text.usetex'] = False
 import os
 from icecream import ic
 import csv
@@ -382,8 +382,8 @@ class MPC_fixed_wing():
         self.wb_b_cont[:,i] = self.dC[:,:,i]@self.wr_r[:,i] - self.dU[3:6,i]
         self.wb_b_cont[:,i] = np.clip(self.wb_b_cont[:,i],-np.pi,np.pi)
         if self.noise:
-            self.f[:,i] = self.f[:,i]*np.random.normal(1,0.1,3)
-            self.wb_b_cont[:,i] = self.wb_b_cont[:,i]*np.random.normal(1,0.1,3)
+            self.f[:,i] = self.f[:,i]*np.random.normal(1,0.01,3)
+            self.wb_b_cont[:,i] = self.wb_b_cont[:,i]*np.random.normal(1,0.01,3)
         if i > 2:
             self.dwb_b_cont[:,i] = (self.wb_b_cont[:,i] - self.wb_b_cont[:,i-1])/self.T
         self.tau[:,i] = self.J@self.dwb_b_cont[:,i] + np.cross(self.wb_b_cont[:,i], self.J@self.wb_b_cont[:,i])
@@ -587,14 +587,14 @@ class MPC_fixed_wing():
         fig = plt.figure()
         plt.subplot(3, 1, 1)
         plt.title("Agent " + self.id)
-        plt.plot(self.t[:-self.Nh],self.X[6,:-self.Nh],label = "real", color = "blue")
-        plt.plot(self.t[:-self.Nh],self.ra_r[0,:-self.Nh],label = "ref.", linestyle='dashed', color = "blue")
+        plt.plot(self.t[:-self.Nh],self.X[6,:-self.Nh], color = "blue")
+        plt.plot(self.t[:-self.Nh],self.ra_r[0,:-self.Nh], linestyle='dashed', color = "blue")
         plt.ylabel('X (m)')
         plt.grid()
         plt.legend()
         plt.subplot(3, 1, 2)
-        plt.plot(self.t[:-self.Nh],self.X[7,:-self.Nh],label = "real", color = "blue")
-        plt.plot(self.t[:-self.Nh],self.ra_r[1,:-self.Nh],label = "ref.", linestyle='dashed', color = "blue")
+        plt.plot(self.t[:-self.Nh],self.X[7,:-self.Nh], color = "blue")
+        plt.plot(self.t[:-self.Nh],self.ra_r[1,:-self.Nh], linestyle='dashed', color = "blue")
         plt.ylabel("Y (m)")
         plt.grid()
         plt.legend()
